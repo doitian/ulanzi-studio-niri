@@ -39,6 +39,18 @@ icon = "firefox"
 on_press = { type = "exec", cmd = "firefox" }
 
 [[page.button]]
+pos = 2
+label = "Cursor"
+icon = "co.anysphere.cursor.png"
+on_press = { type = "exec", cmd = "cursor" }
+
+[[page.button]]
+pos = 3
+label = "VS Code"
+icon = "visual-studio-code"
+on_press = { type = "exec", cmd = "code" }
+
+[[page.button]]
 pos = 10
 label = "Voice"
 icon = "audio-input-microphone"
