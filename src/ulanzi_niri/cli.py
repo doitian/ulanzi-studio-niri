@@ -224,8 +224,8 @@ def _cmd_install_udev() -> int:
     print("sudo udevadm control --reload-rules")
     print("sudo udevadm trigger --subsystem-match=hidraw")
     print()
-    print("# Make sure your user is in the 'plugdev' group:")
-    print(f"#   sudo usermod -aG plugdev {os.environ.get('USER', '$USER')}")
+    print("# Make sure your user is in the 'input' group:")
+    print(f"#   sudo usermod -aG input {os.environ.get('USER', '$USER')}")
     print("#   (then log out + back in)")
     return 0
 
