@@ -51,17 +51,10 @@ icon = "visual-studio-code"
 on_press = { type = "exec", cmd = "code" }
 
 [[page.button]]
-pos = 10
-label = "Voice"
-icon = "audio-input-microphone"
-# Toggle hyprwhspr recording (voice input).
-on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
-
-[[page.button]]
 pos = 4
-label = "Web"
-icon = "applications-internet"
-on_press = { type = "page", goto = "apps" }
+label = "Obsidian"
+icon = "obsidian"
+on_press = { type = "exec", cmd = "obsidian" }
 
 [[page.button]]
 pos = 5
@@ -71,15 +64,46 @@ on_press = { type = "niri", action = "focus-column-left" }
 
 [[page.button]]
 pos = 6
+label = "Focus D"
+icon = "arrow-down"
+on_press = { type = "niri", action = "focus-window-or-workspace-down" }
+
+[[page.button]]
+pos = 7
+label = "Focus U"
+icon = "arrow-up"
+on_press = { type = "niri", action = "focus-window-or-workspace-up" }
+
+[[page.button]]
+pos = 8
 label = "Focus R"
 icon = "arrow-right"
 on_press = { type = "niri", action = "focus-column-right" }
 
 [[page.button]]
-pos = 7
+pos = 9
+label = "Web"
+icon = "applications-internet"
+on_press = { type = "page", goto = "apps" }
+
+[[page.button]]
+pos = 10
+label = "Voice"
+icon = "audio-input-microphone"
+# Toggle hyprwhspr recording (voice input).
+on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
+
+[[page.button]]
+pos = 11
 label = "Maximize"
 icon = "view-fullscreen"
 on_press = { type = "niri", action = "maximize-column" }
+
+[[page.button]]
+pos = 12
+label = "Overview"
+icon = "view-grid"
+on_press = { type = "niri", action = "toggle-overview" }
 
 [[page.button]]
 pos = 14
