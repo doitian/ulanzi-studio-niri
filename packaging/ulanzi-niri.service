@@ -1,0 +1,21 @@
+[Unit]
+Description=Ulanzi Stream Controller D200X driver (niri integration)
+Documentation=https://github.com/anomalyco/ulanzi-studio-niri
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ulanzi-niri run
+Restart=on-failure
+RestartSec=3
+# Lightweight hardening; the daemon needs hidraw + the user session bus
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/.cache/ulanzi-niri
+Environment=ULANZI_NIRI_LOG=INFO
+
+[Install]
+WantedBy=graphical-session.target

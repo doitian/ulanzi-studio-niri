@@ -1,0 +1,105 @@
+# Example config for ulanzi-niri (Ulanzi Stream Controller D200X).
+# Copy to: ~/.config/ulanzi-niri/config.toml
+#
+# Layout reminder:
+#   pos  0..4   row 0 LCD (5 buttons)
+#   pos  5..9   row 1 LCD (5 buttons)
+#   pos 10..12  row 2 LCD (3 buttons; pos 13 is the wide tile)
+#   pos 14..15  plain hardware buttons
+#   pos 16..18  encoder presses (you generally use [[page.encoder]] instead)
+
+[device]
+brightness = 70
+stats_interval_ms = 1000
+encoder_coalesce_ms = 50
+
+[label]
+align = "bottom"
+color = "FFFFFF"
+font_name = "Roboto"
+show_title = true
+size = 28
+weight = 80
+
+# ----------------------------------------------------------------------- main page
+[[page]]
+name = "main"
+default = true
+
+[[page.button]]
+pos = 0
+label = "Term"
+icon = "terminal.png"
+on_press = { type = "exec", cmd = "kitty" }
+
+[[page.button]]
+pos = 1
+label = "Browser"
+icon = "browser.png"
+on_press = { type = "exec", cmd = "firefox" }
+
+[[page.button]]
+pos = 4
+label = "Apps"
+on_press = { type = "page", goto = "apps" }
+
+[[page.button]]
+pos = 5
+label = "Focus L"
+on_press = { type = "niri", action = "focus-column-left" }
+
+[[page.button]]
+pos = 6
+label = "Focus R"
+on_press = { type = "niri", action = "focus-column-right" }
+
+[[page.button]]
+pos = 7
+label = "Maximize"
+on_press = { type = "niri", action = "maximize-column" }
+
+[[page.button]]
+pos = 14
+label = "Mute"
+on_press = { type = "media", cmd = "mute" }
+
+[[page.button]]
+pos = 15
+label = "Play"
+on_press = { type = "media", cmd = "play-pause" }
+
+[page.wide_tile]
+mode = "stats"
+format = "%H:%M:%S"
+
+[[page.encoder]]
+index = 0
+label = "Vol"
+value_provider = { type = "wpctl" }
+on_press = { type = "media", cmd = "mute" }
+on_rotate_cw  = { type = "media", cmd = "vol-up", step = 2 }
+on_rotate_ccw = { type = "media", cmd = "vol-down", step = 2 }
+
+[[page.encoder]]
+index = 1
+label = "Bri"
+value_provider = { type = "brightness" }
+on_rotate_cw  = { type = "brightness", delta = 5 }
+on_rotate_ccw = { type = "brightness", delta = -5 }
+
+# ----------------------------------------------------------------------- second page
+[[page]]
+name = "apps"
+
+[[page.button]]
+pos = 0
+label = "Back"
+on_press = { type = "page", back = true }
+
+[[page.button]]
+pos = 1
+label = "Slack"
+on_press = { type = "exec", cmd = "slack" }
+
+[page.wide_tile]
+mode = "clock"
