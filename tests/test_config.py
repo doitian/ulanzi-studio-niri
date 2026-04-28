@@ -35,19 +35,6 @@ def test_pos_13_rejected_for_button() -> None:
         )
 
 
-def test_encoders_mode_requires_experimental() -> None:
-    with pytest.raises(ValidationError) as ei:
-        _load(
-            """
-            [[page]]
-            name = "x"
-            [page.wide_tile]
-            mode = "encoders"
-            """
-        )
-    assert "experimental" in str(ei.value)
-
-
 def test_duplicate_pos_rejected() -> None:
     with pytest.raises(ValidationError):
         _load(

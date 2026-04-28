@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import shlex
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -12,12 +11,8 @@ from watchfiles import awatch
 
 from .actions import ActionContext, dispatch
 from .config import (
-    BrightnessProvider,
     Config,
-    ExecProvider,
-    StaticProvider,
     WideTileEntry,
-    WpctlProvider,
     load_config,
 )
 from .pages import PageSet
@@ -156,8 +151,6 @@ class Service:
         cfg = page.wide_tile or WideTileEntry(mode="clock")
         state = WideTileState(
             config=cfg,
-            encoders=list(page.encoder),
-            encoder_values={},
         )
         if self._wide is not None:
             self._wide.update_state(state)
@@ -166,7 +159,6 @@ class Service:
             self._device,
             state,
             interval_ms=self._cfg.device.stats_interval_ms,
-            provider=self._encoder_value,
         )
         self._wide.start()
 
@@ -266,53 +258,6 @@ class Service:
         for _ in range(abs(delta)):
             await dispatch(action, ctx)
 
-    # ------------------------------------------------------------------ encoder value provider
-    async def _encoder_value(self, index: int) -> str:
-        enc = next((e for e in self._pages.current.encoder if e.index == index), None)
-        if enc is None or enc.value_provider is None:
-            return ""
-        prov = enc.value_provider
-        if isinstance(prov, StaticProvider):
-            return prov.value
-        if isinstance(prov, BrightnessProvider):
-            return f"{self._brightness}%"
-        if isinstance(prov, WpctlProvider):
-            return await self._wpctl_volume(prov.source)
-        if isinstance(prov, ExecProvider):
-            return await self._exec_provider(prov)
-        return ""
-
-    async def _wpctl_volume(self, source: str) -> str:
-        proc = await asyncio.create_subprocess_exec(
-            "wpctl", "get-volume", source,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        out, _ = await proc.communicate()
-        text = out.decode(errors="replace").strip()
-        # "Volume: 0.42 [MUTED]" -> "42%"
-        try:
-            after = text.split("Volume:", 1)[1].strip().split()[0]
-            pct = int(round(float(after) * 100))
-            suffix = " M" if "MUTED" in text else ""
-            return f"{pct}%{suffix}"
-        except (IndexError, ValueError):
-            return text or "?"
-
-    async def _exec_provider(self, prov: ExecProvider) -> str:
-        if prov.shell:
-            assert isinstance(prov.cmd, str)
-            proc = await asyncio.create_subprocess_shell(
-                prov.cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-            )
-        else:
-            argv = shlex.split(prov.cmd) if isinstance(prov.cmd, str) else list(prov.cmd)
-            proc = await asyncio.create_subprocess_exec(
-                *argv, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
-            )
-        out, _ = await proc.communicate()
-        return out.decode(errors="replace").strip().splitlines()[0] if out else ""
-
     # ------------------------------------------------------------------ control surface (used by actions)
     async def switch_page(self, name: str) -> None:
         if self._pages.switch(name) is None:
@@ -358,8 +303,6 @@ class Service:
             self._wide.update_state(
                 WideTileState(
                     config=new,
-                    encoders=list(page.encoder),
-                    encoder_values={},
                 )
             )
         # Repush the manifest when leaving "background" mode so the leftover

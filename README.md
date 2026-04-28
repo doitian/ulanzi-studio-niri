@@ -95,11 +95,7 @@ the two plain hardware buttons (pos 14, 15), and all three rotary encoders
 one-time `ENABLE_INPUT_STREAMING` (cmd 0x0002) packet on connect, which the
 daemon sends automatically; without it the firmware silently consumes
 encoder rotates (routing them to its built-in brightness handler). Opcode
-discovered empirically by sweep (see `scripts/probe_enable_input.py`).
-
-Wide-tile `mode = "encoders"` is **experimental**: the wire format is a
-best-guess until verified against a packet capture from the official Ulanzi
-software. It must be enabled with `experimental = true`.
+discovered empirically by sweep.
 
 ## Credits
 

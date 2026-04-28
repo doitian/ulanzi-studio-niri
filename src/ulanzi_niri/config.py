@@ -94,42 +94,11 @@ class BrightnessAction(_ActionBase):
 
 class SmallWindowAction(_ActionBase):
     type: Literal["small_window"]
-    mode: Literal["clock", "stats", "encoders", "background"]
+    mode: Literal["clock", "stats", "background"]
 
 
 Action = Annotated[
     NoopAction | NiriAction | ExecAction | MediaAction | ScreenshotAction | KeysAction | PageAction | BrightnessAction | SmallWindowAction,
-    Field(discriminator="type"),
-]
-
-
-# ---------------------------------------------------------------------------- value providers (encoders)
-class _ProviderBase(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-
-class WpctlProvider(_ProviderBase):
-    type: Literal["wpctl"]
-    source: str = "@DEFAULT_AUDIO_SINK@"
-
-
-class BrightnessProvider(_ProviderBase):
-    type: Literal["brightness"]
-
-
-class StaticProvider(_ProviderBase):
-    type: Literal["static"]
-    value: str
-
-
-class ExecProvider(_ProviderBase):
-    type: Literal["exec"]
-    cmd: str | list[str]
-    shell: bool = False
-
-
-ValueProvider = Annotated[
-    WpctlProvider | BrightnessProvider | StaticProvider | ExecProvider,
     Field(discriminator="type"),
 ]
 
@@ -165,7 +134,6 @@ class EncoderEntry(BaseModel):
 
     index: int
     label: str = ""
-    value_provider: ValueProvider | None = None
     on_press: Action | None = None
     on_rotate_cw: Action | None = None
     on_rotate_ccw: Action | None = None
@@ -181,18 +149,13 @@ class EncoderEntry(BaseModel):
 class WideTileEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["clock", "stats", "encoders", "background"] = "clock"
+    mode: Literal["clock", "stats", "background"] = "clock"
     format: str = "%H:%M:%S"
     image: str | None = None  # for mode=background
-    experimental: bool = False
     on_press: Action | None = None
 
     @model_validator(mode="after")
-    def _gate_experimental(self) -> WideTileEntry:
-        if self.mode == "encoders" and not self.experimental:
-            raise ValueError(
-                "wide_tile mode 'encoders' is experimental; set experimental = true to opt in"
-            )
+    def _check_background_image(self) -> WideTileEntry:
         if self.mode == "background" and not self.image:
             raise ValueError("wide_tile mode 'background' requires `image` path")
         return self

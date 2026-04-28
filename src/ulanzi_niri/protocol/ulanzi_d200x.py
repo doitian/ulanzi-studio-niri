@@ -190,7 +190,6 @@ class SmallWindowMode(IntEnum):
     STATS = 0
     CLOCK = 1
     BACKGROUND = 2
-    ENCODERS = 3  # experimental on D200X
 
 
 # ---------------------------------------------------------------------------- device class

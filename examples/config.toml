@@ -75,7 +75,6 @@ format = "%H:%M:%S"
 [[page.encoder]]
 index = 0
 label = "Vol"
-value_provider = { type = "wpctl" }
 on_press = { type = "media", cmd = "mute" }
 on_rotate_cw  = { type = "media", cmd = "vol-up", step = 2 }
 on_rotate_ccw = { type = "media", cmd = "vol-down", step = 2 }
@@ -83,7 +82,6 @@ on_rotate_ccw = { type = "media", cmd = "vol-down", step = 2 }
 [[page.encoder]]
 index = 1
 label = "Bri"
-value_provider = { type = "brightness" }
 on_rotate_cw  = { type = "brightness", delta = 5 }
 on_rotate_ccw = { type = "brightness", delta = -5 }
 
