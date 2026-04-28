@@ -20,7 +20,6 @@ classifiers = [
     "Topic :: Desktop Environment :: Window Managers",
 ]
 dependencies = [
-    "hidapi>=0.14",
     "construct~=2.10",
     "pydantic>=2",
     "pillow>=10",
