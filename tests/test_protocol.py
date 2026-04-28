@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+from ulanzi_niri.protocol.device import DeckEventKind
 from ulanzi_niri.protocol.ulanzi_d200x import (
     HEADER_SIZE,
     MAGIC,
     PACKET_SIZE,
     PAYLOAD_SIZE,
     CommandProtocol,
+    UlanziD200XDevice,
     build_packet,
     chunk_for_zip,
 )
@@ -40,3 +42,96 @@ def test_payload_chunk_overflow_raises() -> None:
 
     with pytest.raises(ValueError):
         build_packet(CommandProtocol.OUT_SET_BRIGHTNESS, b"X" * (PAYLOAD_SIZE + 1))
+
+
+def _button_packet(state: int, index: int, marker: int, value: int) -> bytes:
+    body = bytes([state, index, marker, value])
+    # IN_BUTTON cmd = 0x0101; build incoming-style packet manually since
+    # build_packet uses BE for cmd which matches.
+    pkt = build_packet(CommandProtocol.IN_BUTTON, body)
+    assert pkt[:2] == MAGIC
+    return pkt
+
+
+def _device() -> UlanziD200XDevice:
+    return UlanziD200XDevice(None)  # type: ignore[arg-type]
+
+
+def test_parse_lcd_button_press_release() -> None:
+    dev = _device()
+    [press] = dev._parse_input(_button_packet(0x01, 0x05, 0x01, 0x01))
+    assert press.kind == DeckEventKind.LCD_BUTTON
+    assert press.pos == 5
+    assert press.pressed is True
+
+    [release] = dev._parse_input(_button_packet(0x01, 0x05, 0x01, 0x00))
+    assert release.kind == DeckEventKind.LCD_BUTTON
+    assert release.pressed is False
+
+
+def test_parse_wide_tile_press() -> None:
+    dev = _device()
+    [evt] = dev._parse_input(_button_packet(0x01, 0x0D, 0x01, 0x01))
+    assert evt.kind == DeckEventKind.LCD_BUTTON
+    assert evt.pos == 13
+
+
+def test_parse_extra_hardware_buttons() -> None:
+    dev = _device()
+    [left] = dev._parse_input(_button_packet(0x01, 0x0F, 0x01, 0x01))
+    assert left.kind == DeckEventKind.EXTRA_BUTTON
+    assert left.pos == 14
+    assert left.pressed is True
+
+    [right] = dev._parse_input(_button_packet(0x01, 0x10, 0x01, 0x00))
+    assert right.kind == DeckEventKind.EXTRA_BUTTON
+    assert right.pos == 15
+    assert right.pressed is False
+
+
+def test_parse_encoder_press_release() -> None:
+    dev = _device()
+    for wire_idx, enc_idx in ((0x11, 0), (0x12, 1), (0x13, 2)):
+        [press] = dev._parse_input(_button_packet(0x01, wire_idx, 0x02, 0x01))
+        assert press.kind == DeckEventKind.ENCODER_PRESS
+        assert press.encoder_index == enc_idx
+        assert press.pressed is True
+
+        [release] = dev._parse_input(_button_packet(0x01, wire_idx, 0x02, 0x00))
+        assert release.kind == DeckEventKind.ENCODER_PRESS
+        assert release.pressed is False
+
+
+def test_parse_encoder_rotate() -> None:
+    dev = _device()
+    [cw] = dev._parse_input(_button_packet(0x01, 0x11, 0x02, 0x02))
+    assert cw.kind == DeckEventKind.ENCODER_ROTATE
+    assert cw.encoder_index == 0
+    assert cw.delta == 1
+
+    [ccw] = dev._parse_input(_button_packet(0x01, 0x13, 0x02, 0x03))
+    assert ccw.kind == DeckEventKind.ENCODER_ROTATE
+    assert ccw.encoder_index == 2
+    assert ccw.delta == -1
+
+
+def test_parse_unknown_marker_falls_back() -> None:
+    dev = _device()
+    [evt] = dev._parse_input(_button_packet(0x01, 0xFF, 0xAA, 0x00))
+    assert evt.kind == DeckEventKind.UNKNOWN
+
+
+def test_get_device_info_packet() -> None:
+    pkt = build_packet(CommandProtocol.OUT_GET_DEVICE_INFO, b"")
+    assert len(pkt) == PACKET_SIZE
+    assert pkt[:2] == MAGIC
+    assert pkt[2:4] == b"\x00\x03"
+    assert pkt[4:8] == b"\x00\x00\x00\x00"
+
+
+def test_enable_input_streaming_packet() -> None:
+    pkt = build_packet(CommandProtocol.OUT_ENABLE_INPUT_STREAMING, b"")
+    assert len(pkt) == PACKET_SIZE
+    assert pkt[:2] == MAGIC
+    assert pkt[2:4] == b"\x00\x02"
+    assert pkt[4:8] == b"\x00\x00\x00\x00"

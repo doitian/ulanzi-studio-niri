@@ -24,7 +24,6 @@ from .pages import PageSet
 from .protocol.device import DeckEvent, DeckEventKind
 from .protocol.manager import open_device
 from .protocol.ulanzi_d200x import (
-    EXTRA_BUTTON_POS_BASE,
     WIDE_TILE_POS,
     UlanziD200XDevice,
 )
@@ -54,33 +53,6 @@ class Service:
         self._encoder_accum: dict[int, int] = {}
         self._encoder_flush_task: dict[int, asyncio.Task] = {}
         self._brightness: int = self._cfg.device.brightness
-        self._warn_unsupported_bindings()
-
-    def _warn_unsupported_bindings(self) -> None:
-        """v0: firmware does not stream extras (pos 14/15) or encoder events.
-
-        Surface a single warning so users know configured bindings will be
-        silently inert until the input opcodes are reverse-engineered.
-        """
-        extras_pages: list[str] = []
-        encoder_pages: list[str] = []
-        for page in self._cfg.page:
-            if any(b.pos >= EXTRA_BUTTON_POS_BASE for b in page.button):
-                extras_pages.append(page.name)
-            if page.encoder:
-                encoder_pages.append(page.name)
-        if extras_pages:
-            log.warning(
-                "v0 limitation: hardware-button (pos 14/15) events are not "
-                "yet decoded; bindings on pages %s will not fire",
-                extras_pages,
-            )
-        if encoder_pages:
-            log.warning(
-                "v0 limitation: encoder press/rotate events are not yet "
-                "decoded; encoder bindings on pages %s will not fire",
-                encoder_pages,
-            )
 
     # ------------------------------------------------------------------ public lifecycle
     async def run(self) -> None:
@@ -139,6 +111,11 @@ class Service:
         await self._device.set_brightness(self._brightness, force=True)
         await self._device.set_label_style(self._cfg.label.model_dump(), force=True)
         await self._render_current_page()
+        # Unlock IN_BUTTON streaming for 4th-row HW buttons + encoders.
+        # Without this the firmware eats those events.
+        await self._device.enable_input_streaming()
+        # Logs banner JSON (serial / fw version).
+        await self._device.request_device_info()
         self._start_wide_tile_worker()
 
     async def _event_loop(self) -> None:

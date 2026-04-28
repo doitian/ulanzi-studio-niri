@@ -7,17 +7,29 @@ Wire format (adapted from redphx/strmdck's D200 work):
 Outgoing commands recognized by the firmware:
 
     0x0001 SET_BUTTONS               - full button manifest (zip stream)
+    0x0002 ENABLE_INPUT_STREAMING    - empty payload; unlocks IN_BUTTON
+                                       events for the 4th-row hardware
+                                       buttons (pos 14/15) and the rotary
+                                       encoders. Without this the firmware
+                                       silently routes encoder rotates to
+                                       its built-in brightness handler and
+                                       eats the HW button presses entirely.
+                                       Discovered by opcode sweep, 2026-04-28.
     0x000d PARTIALLY_UPDATE_BUTTONS  - incremental manifest
     0x0006 SET_SMALL_WINDOW_DATA     - wide-tile content (clock/stats/etc)
     0x000a SET_BRIGHTNESS            - 0..100 as ASCII
     0x000b SET_LABEL_STYLE           - JSON style for button labels
+    0x0003 GET_DEVICE_INFO           - request device-info JSON banner
 
 Incoming:
 
-    0x0101 BUTTON                    - press/release events
-    0x0303 DEVICE_INFO               - banner string
-
-The D200X grid is:
+    0x0101 BUTTON                    - press/release events; see _parse_button
+                                       for the wire-index -> config-pos map.
+                                       4th-row HW buttons (pos 14/15) and
+                                       encoders are only emitted after the
+                                       host sends ENABLE_INPUT_STREAMING
+                                       (0x0002).
+    0x0303 DEVICE_INFO                - JSON banner with serial, version, etcThe D200X grid is:
 
     Row 0 (LCD): pos 0..4   (5 x 196x196)
     Row 1 (LCD): pos 5..9   (5 x 196x196)
@@ -45,6 +57,8 @@ log = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------- protocol constants
 class CommandProtocol(IntEnum):
     OUT_SET_BUTTONS = 0x0001
+    OUT_ENABLE_INPUT_STREAMING = 0x0002
+    OUT_GET_DEVICE_INFO = 0x0003
     OUT_PARTIALLY_UPDATE_BUTTONS = 0x000D
     OUT_SET_SMALL_WINDOW_DATA = 0x0006
     OUT_SET_BRIGHTNESS = 0x000A
@@ -119,9 +133,32 @@ LCD_BUTTON_COUNT = 13
 EXTRA_BUTTON_COUNT = 2
 ENCODER_COUNT = 3
 
+# Wire indices in the IN_BUTTON payload (state | index | marker | value | ...).
+#   marker 0x01: physical buttons. Wire indices 0..12 -> LCD pos 0..12,
+#                wire index 13 -> wide tile (pos 13). Wire indices 14 are
+#                reserved/unused; wire index 15 -> hardware button left
+#                (config pos 14), wire index 16 -> hardware button right
+#                (config pos 15).
+#   marker 0x02: encoders. Wire indices 17..19 -> encoder 0..2.
+#                value 0x00/0x01 = release/press click; value 0x02 = rotate
+#                clockwise (single click pulse); value 0x03 = rotate
+#                counter-clockwise. Encoders never emit a release for rotate.
+#
+# Confirmed via Windows USB sniff of the official Ulanzi app on 2026-04-28.
+WIRE_INDEX_LCD_MAX = 12
+WIRE_INDEX_WIDE_TILE = 13
+WIRE_INDEX_EXTRA_BUTTON_LEFT = 15
+WIRE_INDEX_EXTRA_BUTTON_RIGHT = 16
+WIRE_INDEX_ENCODER_BASE = 17  # 17, 18, 19
+
+ENCODER_VALUE_RELEASE = 0x00
+ENCODER_VALUE_PRESS = 0x01
+ENCODER_VALUE_ROTATE_CW = 0x02
+ENCODER_VALUE_ROTATE_CCW = 0x03
+
 WIDE_TILE_POS = 13
-EXTRA_BUTTON_POS_BASE = 14   # 14, 15
-ENCODER_PRESS_POS_BASE = 16  # 16, 17, 18
+EXTRA_BUTTON_POS_BASE = 14   # config pos 14, 15
+ENCODER_INDEX_MAX = 2        # config encoder.index 0..2
 
 STD_ICON = (196, 196)
 WIDE_ICON = (458, 196)
@@ -226,6 +263,30 @@ class UlanziD200XDevice(DeckDevice):
         packets = chunk_for_zip(cmd, blob)
         await self.write_packet(packets)
 
+    async def request_device_info(self) -> None:
+        """Ask the firmware to emit IN_DEVICE_INFO (banner JSON).
+
+        Triggers an IN_DEVICE_INFO reply with serial / firmware version /
+        hardware revision, useful for logging on connect. Does NOT enable
+        input streaming on its own; use enable_input_streaming for that.
+        """
+        packet = build_packet(CommandProtocol.OUT_GET_DEVICE_INFO, b"")
+        await self.write_packet(packet)
+
+    async def enable_input_streaming(self) -> None:
+        """Unlock IN_BUTTON events for the 4th-row HW buttons + encoders.
+
+        Without this opcode the firmware silently consumes encoder rotates
+        (routing them to its built-in brightness handler) and drops 4th-row
+        button presses entirely. Send once after every connect / reconnect.
+
+        Discovered empirically by opcode sweep on 2026-04-28; the official
+        Windows app sends the same packet shortly after handshake. Empty
+        payload; no reply expected.
+        """
+        packet = build_packet(CommandProtocol.OUT_ENABLE_INPUT_STREAMING, b"")
+        await self.write_packet(packet)
+
     # ------------------------------------------------------------------ incoming
     def _parse_input(self, data: bytes) -> list[DeckEvent]:
         if len(data) < HEADER_SIZE:
@@ -251,31 +312,86 @@ class UlanziD200XDevice(DeckDevice):
 
         return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=data, extras={"cmd": cmd})]
 
-    # Button payload layout (confirmed for LCD + wide tile):
-    #   state:u8 | index:u8 | const 0x01 | pressed:u8 | ...
+    # Button payload layout:
+    #   state:u8 | index:u8 | marker:u8 | value:u8 | ...
     #
-    # v0 limitation: the firmware does not stream events for the two extra
-    # hardware buttons (pos 14, 15) or the three rotary encoders (rotate or
-    # press) on interface 0 after a manifest is pushed; they also do not
-    # appear on the boot-keyboard interface 1. Reverse-engineering of the
-    # opcode required to enable that streaming is a TODO. Any unexpected
-    # frame is surfaced as UNKNOWN with the raw bytes preserved.
+    # marker 0x01: physical button (LCD 0..12, wide tile 13, hw buttons at
+    # wire indices 15/16 mapped to config pos 14/15). value = 1 press, 0 release.
+    #
+    # marker 0x02: encoder. wire indices 17..19 = encoder 0..2.
+    # value 0/1 = release/press click; value 2/3 = rotate CW/CCW (one pulse
+    # per packet, no release).
     def _parse_button(self, body: bytes, *, raw: bytes) -> list[DeckEvent]:
         if len(body) < 4:
             return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=raw)]
         state, index, marker, value = body[0], body[1], body[2], body[3]
 
-        # LCD + wide-tile press/release: index 0..13 -> pos 0..13
-        if marker == 0x01 and index <= WIDE_TILE_POS:
-            return [
-                DeckEvent(
-                    kind=DeckEventKind.LCD_BUTTON,
-                    pos=index,
-                    pressed=bool(value),
-                    raw=raw,
-                    extras={"state": state},
-                )
-            ]
+        if marker == 0x01:
+            if index <= WIRE_INDEX_WIDE_TILE:
+                # LCD pos 0..12 + wide tile (pos 13)
+                return [
+                    DeckEvent(
+                        kind=DeckEventKind.LCD_BUTTON,
+                        pos=index,
+                        pressed=bool(value),
+                        raw=raw,
+                        extras={"state": state},
+                    )
+                ]
+            if index == WIRE_INDEX_EXTRA_BUTTON_LEFT:
+                return [
+                    DeckEvent(
+                        kind=DeckEventKind.EXTRA_BUTTON,
+                        pos=EXTRA_BUTTON_POS_BASE,  # 14
+                        pressed=bool(value),
+                        raw=raw,
+                        extras={"state": state},
+                    )
+                ]
+            if index == WIRE_INDEX_EXTRA_BUTTON_RIGHT:
+                return [
+                    DeckEvent(
+                        kind=DeckEventKind.EXTRA_BUTTON,
+                        pos=EXTRA_BUTTON_POS_BASE + 1,  # 15
+                        pressed=bool(value),
+                        raw=raw,
+                        extras={"state": state},
+                    )
+                ]
+
+        if marker == 0x02:
+            enc_index = index - WIRE_INDEX_ENCODER_BASE
+            if 0 <= enc_index <= ENCODER_INDEX_MAX:
+                if value in (ENCODER_VALUE_PRESS, ENCODER_VALUE_RELEASE):
+                    return [
+                        DeckEvent(
+                            kind=DeckEventKind.ENCODER_PRESS,
+                            encoder_index=enc_index,
+                            pressed=value == ENCODER_VALUE_PRESS,
+                            raw=raw,
+                            extras={"state": state},
+                        )
+                    ]
+                if value == ENCODER_VALUE_ROTATE_CW:
+                    return [
+                        DeckEvent(
+                            kind=DeckEventKind.ENCODER_ROTATE,
+                            encoder_index=enc_index,
+                            delta=1,
+                            raw=raw,
+                            extras={"state": state},
+                        )
+                    ]
+                if value == ENCODER_VALUE_ROTATE_CCW:
+                    return [
+                        DeckEvent(
+                            kind=DeckEventKind.ENCODER_ROTATE,
+                            encoder_index=enc_index,
+                            delta=-1,
+                            raw=raw,
+                            extras={"state": state},
+                        )
+                    ]
 
         return [
             DeckEvent(

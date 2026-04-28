@@ -89,14 +89,13 @@ uv run ruff check .             # lint
 
 ## Status
 
-**v0 limitations** — only the 13 LCD buttons and the wide tile (pos 13) emit
-events on the device's HID interface after a manifest is pushed. The two
-plain hardware buttons (pos 14, 15) and the three rotary encoders (rotate
-and click) are silent on both HID interfaces; the opcode required to enable
-their input stream has not yet been reverse-engineered. Bindings on those
-controls are accepted by the config loader but will not fire — a warning is
-logged at startup. Help wanted: a USB capture from the official Ulanzi
-software (Windows/macOS) while pressing those controls would unblock this.
+All physical inputs are wired: the 13 LCD buttons, the wide tile (pos 13),
+the two plain hardware buttons (pos 14, 15), and all three rotary encoders
+(press + rotate). Streaming for the 4th-row buttons and encoders requires a
+one-time `ENABLE_INPUT_STREAMING` (cmd 0x0002) packet on connect, which the
+daemon sends automatically; without it the firmware silently consumes
+encoder rotates (routing them to its built-in brightness handler). Opcode
+discovered empirically by sweep (see `scripts/probe_enable_input.py`).
 
 Wide-tile `mode = "encoders"` is **experimental**: the wire format is a
 best-guess until verified against a packet capture from the official Ulanzi
