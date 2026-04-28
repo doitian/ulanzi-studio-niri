@@ -1,6 +1,6 @@
 [Unit]
 Description=Ulanzi Stream Controller D200X driver (niri integration)
-Documentation=https://github.com/anomalyco/ulanzi-studio-niri
+Documentation=https://github.com/doitian/ulanzi-studio-niri
 After=graphical-session.target
 PartOf=graphical-session.target
 
