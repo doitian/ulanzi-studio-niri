@@ -35,8 +35,7 @@ from dataclasses import dataclass
 from enum import IntEnum
 from typing import Any
 
-from construct import Bytes, BytesInteger, Const, GreedyBytes, Int32ub, Padded, Struct
-from construct import ByteSwapped
+from construct import Bytes, BytesInteger, ByteSwapped, Const, GreedyBytes, Int32ub, Padded, Struct
 
 from .device import DeckDevice, DeckEvent, DeckEventKind
 

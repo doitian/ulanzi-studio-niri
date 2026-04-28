@@ -6,7 +6,6 @@ Encapsulates lookup, switching, history (for `page.back`), and toggling.
 from __future__ import annotations
 
 import logging
-from typing import Optional
 
 from .config import Config, PageConfig
 
@@ -38,7 +37,7 @@ class PageSet:
         self._history = [n for n in self._history if n in valid]
         return target
 
-    def switch(self, name: str) -> Optional[PageConfig]:
+    def switch(self, name: str) -> PageConfig | None:
         page = self._cfg.get_page(name)
         if page is None:
             log.warning("no such page: %s", name)
@@ -49,7 +48,7 @@ class PageSet:
         self._current = page
         return page
 
-    def back(self) -> Optional[PageConfig]:
+    def back(self) -> PageConfig | None:
         while self._history:
             name = self._history.pop()
             page = self._cfg.get_page(name)
@@ -58,7 +57,7 @@ class PageSet:
                 return page
         return None
 
-    def toggle(self, name: str) -> Optional[PageConfig]:
+    def toggle(self, name: str) -> PageConfig | None:
         if self._current.name == name:
             return self.back() or self._current
         return self.switch(name)

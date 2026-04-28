@@ -10,9 +10,10 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Iterable
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -68,7 +69,7 @@ class DeckDevice(ABC):
         """Async generator-like coroutine that reads one batch of events."""
         raise NotImplementedError  # use async iterator interface instead
 
-    def __aiter__(self) -> "DeckDevice":
+    def __aiter__(self) -> DeckDevice:
         return self
 
     async def __anext__(self) -> DeckEvent:

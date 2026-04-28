@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
 
 import hid
 
@@ -13,7 +12,7 @@ from .ulanzi_d200x import UlanziD200XDevice
 log = logging.getLogger(__name__)
 
 
-def find_device_path() -> Optional[bytes]:
+def find_device_path() -> bytes | None:
     """Return the hidraw path for the D200X control interface (interface 0)."""
     for entry in hid.enumerate(UlanziD200XDevice.USB_VENDOR_ID, UlanziD200XDevice.USB_PRODUCT_ID):
         if entry.get("interface_number") == UlanziD200XDevice.USB_INTERFACE:
@@ -21,7 +20,7 @@ def find_device_path() -> Optional[bytes]:
     return None
 
 
-def open_device() -> Optional[UlanziD200XDevice]:
+def open_device() -> UlanziD200XDevice | None:
     """Open the first available D200X. Returns None if not connected."""
     path = find_device_path()
     if path is None:

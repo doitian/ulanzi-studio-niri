@@ -20,7 +20,7 @@ class StatsSnapshot:
     time: str  # HH:MM:SS
 
     @classmethod
-    def sample(cls, time_format: str = "%H:%M:%S") -> "StatsSnapshot":
+    def sample(cls, time_format: str = "%H:%M:%S") -> StatsSnapshot:
         return cls(
             cpu=int(round(psutil.cpu_percent(interval=None))),
             mem=int(round(psutil.virtual_memory().percent)),

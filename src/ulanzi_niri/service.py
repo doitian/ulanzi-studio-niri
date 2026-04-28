@@ -7,7 +7,6 @@ import logging
 import shlex
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from watchfiles import awatch
 
@@ -15,9 +14,7 @@ from .actions import ActionContext, dispatch
 from .config import (
     BrightnessProvider,
     Config,
-    EncoderEntry,
     ExecProvider,
-    PageConfig,
     StaticProvider,
     WideTileEntry,
     WpctlProvider,
@@ -25,12 +22,10 @@ from .config import (
 )
 from .pages import PageSet
 from .protocol.device import DeckEvent, DeckEventKind
-from .protocol.manager import open_device, wait_for_device
+from .protocol.manager import wait_for_device
 from .protocol.ulanzi_d200x import (
-    ENCODER_PRESS_POS_BASE,
-    EXTRA_BUTTON_POS_BASE,
-    UlanziD200XDevice,
     WIDE_TILE_POS,
+    UlanziD200XDevice,
 )
 from .stats import prime_cpu_sampler
 from .wide_tile import WideTileState, WideTileWorker
@@ -43,7 +38,7 @@ log = logging.getLogger(__name__)
 class _PressState:
     pressed_at: float
     long_press_fired: bool = False
-    long_press_task: Optional[asyncio.Task] = None
+    long_press_task: asyncio.Task | None = None
 
 
 class Service:
@@ -51,8 +46,8 @@ class Service:
         self._config_path = config_path
         self._cfg: Config = load_config(config_path)
         self._pages = PageSet(self._cfg)
-        self._device: Optional[UlanziD200XDevice] = None
-        self._wide: Optional[WideTileWorker] = None
+        self._device: UlanziD200XDevice | None = None
+        self._wide: WideTileWorker | None = None
         self._stop = asyncio.Event()
         self._press_state: dict[int, _PressState] = {}
         self._encoder_accum: dict[int, int] = {}

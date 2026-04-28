@@ -8,7 +8,6 @@ with random bytes until the resulting ZIP avoids the bad offsets.
 
 from __future__ import annotations
 
-import io
 import json
 import logging
 import os

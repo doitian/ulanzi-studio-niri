@@ -16,9 +16,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Awaitable, Callable, Optional
 
 from .config import EncoderEntry, WideTileEntry
 from .protocol.ulanzi_d200x import SmallWindowMode, UlanziD200XDevice
@@ -70,13 +70,13 @@ class WideTileWorker:
         device: UlanziD200XDevice,
         state: WideTileState,
         interval_ms: int,
-        provider: Optional[EncoderValueProvider] = None,
+        provider: EncoderValueProvider | None = None,
     ) -> None:
         self._device = device
         self._state = state
         self._interval = max(0.05, interval_ms / 1000.0)
         self._provider = provider
-        self._task: Optional[asyncio.Task] = None
+        self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
     def start(self) -> None:
@@ -90,7 +90,7 @@ class WideTileWorker:
         if self._task is not None:
             try:
                 await asyncio.wait_for(self._task, timeout=1.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 self._task.cancel()
             self._task = None
 
@@ -105,7 +105,7 @@ class WideTileWorker:
                 log.exception("wide-tile tick failed")
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=self._interval)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 continue
 
     async def _tick(self) -> None:

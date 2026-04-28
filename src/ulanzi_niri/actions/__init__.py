@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 @dataclass
 class ActionContext:
-    service: "Service"
+    service: Service
     page_name: str
     source: str  # "button:5", "encoder:0:press", "encoder:0:cw", ...
 
@@ -60,7 +60,7 @@ async def _run_argv(argv: list[str], *, env: dict[str, str] | None = None, timeo
         return 127
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         log.error("command timed out: %s", argv)
         return 124
@@ -82,7 +82,7 @@ async def _run_shell(cmd: str, *, env: dict[str, str] | None = None, timeout: fl
     )
     try:
         _, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         log.error("shell timed out: %s", cmd)
         return 124

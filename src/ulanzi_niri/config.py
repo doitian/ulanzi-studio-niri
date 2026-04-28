@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any, Literal, Optional, Union
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -14,7 +14,6 @@ from .protocol.ulanzi_d200x import (
     ENCODER_COUNT,
     EXTRA_BUTTON_COUNT,
     EXTRA_BUTTON_POS_BASE,
-    LCD_BUTTON_COUNT,
     WIDE_TILE_POS,
 )
 
@@ -41,7 +40,7 @@ class NiriAction(_ActionBase):
 
 class ExecAction(_ActionBase):
     type: Literal["exec"]
-    cmd: Union[str, list[str]]
+    cmd: str | list[str]
     shell: bool = False
     env: dict[str, str] = Field(default_factory=dict)
 
@@ -52,14 +51,14 @@ class MediaAction(_ActionBase):
         "play-pause", "play", "pause", "next", "prev", "stop",
         "vol-up", "vol-down", "mute",
     ]
-    player: Optional[str] = None
+    player: str | None = None
     step: int = 5  # percent step for volume
 
 
 class ScreenshotAction(_ActionBase):
     type: Literal["screenshot"]
     target: Literal["full", "region", "window"] = "region"
-    output_dir: Optional[str] = None
+    output_dir: str | None = None
 
 
 class KeysAction(_ActionBase):
@@ -70,12 +69,12 @@ class KeysAction(_ActionBase):
 
 class PageAction(_ActionBase):
     type: Literal["page"]
-    goto: Optional[str] = None
+    goto: str | None = None
     back: bool = False
-    toggle: Optional[str] = None
+    toggle: str | None = None
 
     @model_validator(mode="after")
-    def _validate(self) -> "PageAction":
+    def _validate(self) -> PageAction:
         if not (self.goto or self.back or self.toggle):
             raise ValueError("page action requires one of: goto, back=true, toggle")
         return self
@@ -83,11 +82,11 @@ class PageAction(_ActionBase):
 
 class BrightnessAction(_ActionBase):
     type: Literal["brightness"]
-    delta: Optional[int] = None
-    set: Optional[int] = Field(default=None, alias="set")
+    delta: int | None = None
+    set: int | None = Field(default=None, alias="set")
 
     @model_validator(mode="after")
-    def _validate(self) -> "BrightnessAction":
+    def _validate(self) -> BrightnessAction:
         if (self.delta is None) == (self.set is None):
             raise ValueError("brightness action requires exactly one of delta or set")
         return self
@@ -99,17 +98,7 @@ class SmallWindowAction(_ActionBase):
 
 
 Action = Annotated[
-    Union[
-        NoopAction,
-        NiriAction,
-        ExecAction,
-        MediaAction,
-        ScreenshotAction,
-        KeysAction,
-        PageAction,
-        BrightnessAction,
-        SmallWindowAction,
-    ],
+    NoopAction | NiriAction | ExecAction | MediaAction | ScreenshotAction | KeysAction | PageAction | BrightnessAction | SmallWindowAction,
     Field(discriminator="type"),
 ]
 
@@ -135,12 +124,12 @@ class StaticProvider(_ProviderBase):
 
 class ExecProvider(_ProviderBase):
     type: Literal["exec"]
-    cmd: Union[str, list[str]]
+    cmd: str | list[str]
     shell: bool = False
 
 
 ValueProvider = Annotated[
-    Union[WpctlProvider, BrightnessProvider, StaticProvider, ExecProvider],
+    WpctlProvider | BrightnessProvider | StaticProvider | ExecProvider,
     Field(discriminator="type"),
 ]
 
@@ -151,10 +140,10 @@ class ButtonEntry(BaseModel):
 
     pos: int
     label: str = ""
-    icon: Optional[str] = None
-    on_press: Optional[Action] = None
-    on_release: Optional[Action] = None
-    on_long_press: Optional[Action] = None
+    icon: str | None = None
+    on_press: Action | None = None
+    on_release: Action | None = None
+    on_long_press: Action | None = None
     long_press_ms: int = 500
 
     @field_validator("pos")
@@ -176,10 +165,10 @@ class EncoderEntry(BaseModel):
 
     index: int
     label: str = ""
-    value_provider: Optional[ValueProvider] = None
-    on_press: Optional[Action] = None
-    on_rotate_cw: Optional[Action] = None
-    on_rotate_ccw: Optional[Action] = None
+    value_provider: ValueProvider | None = None
+    on_press: Action | None = None
+    on_rotate_cw: Action | None = None
+    on_rotate_ccw: Action | None = None
 
     @field_validator("index")
     @classmethod
@@ -194,12 +183,12 @@ class WideTileEntry(BaseModel):
 
     mode: Literal["clock", "stats", "encoders", "background"] = "clock"
     format: str = "%H:%M:%S"
-    image: Optional[str] = None  # for mode=background
+    image: str | None = None  # for mode=background
     experimental: bool = False
-    on_press: Optional[Action] = None
+    on_press: Action | None = None
 
     @model_validator(mode="after")
-    def _gate_experimental(self) -> "WideTileEntry":
+    def _gate_experimental(self) -> WideTileEntry:
         if self.mode == "encoders" and not self.experimental:
             raise ValueError(
                 "wide_tile mode 'encoders' is experimental; set experimental = true to opt in"
@@ -216,7 +205,7 @@ class PageConfig(BaseModel):
     default: bool = False
     button: list[ButtonEntry] = Field(default_factory=list)
     encoder: list[EncoderEntry] = Field(default_factory=list)
-    wide_tile: Optional[WideTileEntry] = None
+    wide_tile: WideTileEntry | None = None
 
     @field_validator("wide_tile", mode="before")
     @classmethod
@@ -231,7 +220,7 @@ class PageConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _no_dupe_pos(self) -> "PageConfig":
+    def _no_dupe_pos(self) -> PageConfig:
         seen: set[int] = set()
         for b in self.button:
             if b.pos in seen:
@@ -272,7 +261,7 @@ class Config(BaseModel):
     page: list[PageConfig] = Field(default_factory=list)
 
     @model_validator(mode="after")
-    def _has_default_page(self) -> "Config":
+    def _has_default_page(self) -> Config:
         if not self.page:
             raise ValueError("config must define at least one [[page]]")
         defaults = [p for p in self.page if p.default]
@@ -291,7 +280,7 @@ class Config(BaseModel):
                 return p
         return self.page[0]
 
-    def get_page(self, name: str) -> Optional[PageConfig]:
+    def get_page(self, name: str) -> PageConfig | None:
         for p in self.page:
             if p.name == name:
                 return p
@@ -304,7 +293,7 @@ def default_config_path() -> Path:
     return Path(base) / "ulanzi-niri" / "config.toml"
 
 
-def load_config(path: Optional[Path] = None) -> Config:
+def load_config(path: Path | None = None) -> Config:
     p = path or default_config_path()
     with open(p, "rb") as fp:
         data: dict[str, Any] = tomllib.load(fp)

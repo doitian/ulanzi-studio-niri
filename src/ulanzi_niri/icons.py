@@ -12,7 +12,6 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 from PIL import Image, ImageDraw, ImageFont
 
@@ -37,7 +36,7 @@ def _bundled_icons_dir() -> Path:
     return Path(__file__).resolve().parent.parent.parent / "assets" / "icons"
 
 
-def resolve_icon_path(name: str) -> Optional[Path]:
+def resolve_icon_path(name: str) -> Path | None:
     """Look up an icon by name in user + bundled icon directories."""
     for base in (_user_icons_dir(), _bundled_icons_dir()):
         p = base / name
@@ -49,7 +48,7 @@ def resolve_icon_path(name: str) -> Optional[Path]:
 @dataclass(frozen=True)
 class RenderRequest:
     label: str
-    icon: Optional[str]
+    icon: str | None
     width: int
     height: int
     label_color: str = "FFFFFF"
@@ -88,7 +87,6 @@ def render(req: RenderRequest) -> bytes:
     draw = ImageDraw.Draw(img)
 
     # Optional icon: centered horizontally, anchored above the label
-    icon_h = 0
     if req.icon:
         path = resolve_icon_path(req.icon)
         if path is not None:
@@ -101,7 +99,6 @@ def render(req: RenderRequest) -> bytes:
                 x = (req.width - icon.width) // 2
                 y = 8 if req.show_title and req.label else (req.height - icon.height) // 2
                 img.paste(icon, (x, y), icon)
-                icon_h = icon.height + y
             except (OSError, ValueError) as exc:
                 log.warning("failed to load icon %s: %s", req.icon, exc)
 
@@ -137,7 +134,7 @@ def render_cached(req: RenderRequest) -> Path:
 
 def request_from_button(
     label: str,
-    icon: Optional[str],
+    icon: str | None,
     width: int,
     height: int,
     label_cfg: LabelConfig,
