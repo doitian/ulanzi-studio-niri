@@ -168,7 +168,8 @@ class Service:
     async def _render_current_page(self) -> None:
         assert self._device is not None
         page = self._pages.current
-        blob = build_buttons_zip(page.button, self._cfg.label)
+        wt_mode = page.wide_tile.mode if page.wide_tile is not None else "clock"
+        blob = build_buttons_zip(page.button, self._cfg.label, wide_tile_mode=wt_mode)
         await self._device.push_buttons_zip(blob)
         log.info("pushed page %r (%d buttons)", page.name, len(page.button))
 
@@ -373,6 +374,7 @@ class Service:
 
     async def set_wide_tile_mode(self, mode: str) -> None:
         page = self._pages.current
+        prev_mode = page.wide_tile.mode if page.wide_tile is not None else "clock"
         new = (page.wide_tile or WideTileEntry()).model_copy(update={"mode": mode})
         page.wide_tile = new
         if self._wide is not None:
@@ -383,6 +385,12 @@ class Service:
                     encoder_values={},
                 )
             )
+        # Repush the manifest when leaving "background" mode so the leftover
+        # wide-tile background image gets overwritten with our solid-black
+        # placeholder. Going *into* background mode also repushes, so we drop
+        # the placeholder and let the firmware's stored bg show through.
+        if prev_mode != mode and (prev_mode == "background" or mode == "background"):
+            await self._render_current_page()
 
     # ------------------------------------------------------------------ config reload
     async def _watch_config(self) -> None:

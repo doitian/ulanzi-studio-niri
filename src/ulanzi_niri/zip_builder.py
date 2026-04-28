@@ -20,8 +20,13 @@ import zipfile
 from pathlib import Path
 
 from .config import ButtonEntry, LabelConfig
-from .icons import render_cached, request_from_button
-from .protocol.ulanzi_d200x import BUTTON_GEOMETRY, PACKET_SIZE, PAYLOAD_SIZE
+from .icons import RenderRequest, render_cached, request_from_button
+from .protocol.ulanzi_d200x import (
+    BUTTON_GEOMETRY,
+    PACKET_SIZE,
+    PAYLOAD_SIZE,
+    WIDE_TILE_GEOMETRY,
+)
 
 log = logging.getLogger(__name__)
 
@@ -67,8 +72,15 @@ def build_buttons_zip(
     label_cfg: LabelConfig,
     *,
     workdir: Path | None = None,
+    wide_tile_mode: str | None = None,
 ) -> bytes:
-    """Build the buttons ZIP blob; safe for the firmware's packet alignment."""
+    """Build the buttons ZIP blob; safe for the firmware's packet alignment.
+
+    When ``wide_tile_mode`` is set to anything other than ``"background"``, a
+    solid-black 458x196 tile is injected at manifest key ``3_2`` so the
+    firmware overwrites any leftover wide-tile background image. The text-mode
+    payload (clock/stats/encoders) is then composited cleanly on top.
+    """
     workdir = workdir or Path(tempfile.mkdtemp(prefix="ulanzi-build-"))
     page_dir = workdir / "page"
     icons_dir = page_dir / "icons"
@@ -99,6 +111,25 @@ def build_buttons_zip(
         manifest[f"{geom.col}_{geom.row}"] = {
             "State": 0,
             "ViewParam": [view],
+        }
+
+    if wide_tile_mode is not None and wide_tile_mode != "background":
+        wgeom = WIDE_TILE_GEOMETRY
+        req = RenderRequest(
+            label="",
+            icon=None,
+            width=wgeom.width,
+            height=wgeom.height,
+            bg_color="000000",
+            show_title=False,
+        )
+        cached = render_cached(req)
+        target = icons_dir / cached.name
+        if not target.exists():
+            shutil.copyfile(cached, target)
+        manifest[f"{wgeom.col}_{wgeom.row}"] = {
+            "State": 0,
+            "ViewParam": [{"Icon": f"icons/{cached.name}"}],
         }
 
     (page_dir / "manifest.json").write_text(
