@@ -15,7 +15,7 @@ encoder_coalesce_ms = 50
 
 [label]
 align = "bottom"
-color = "FFFFFF"
+color = "CDCDCD"
 font_name = "Roboto"
 show_title = true
 size = 28
@@ -47,16 +47,19 @@ on_press = { type = "page", goto = "apps" }
 [[page.button]]
 pos = 5
 label = "Focus L"
+icon = "arrow-left"
 on_press = { type = "niri", action = "focus-column-left" }
 
 [[page.button]]
 pos = 6
 label = "Focus R"
+icon = "arrow-right"
 on_press = { type = "niri", action = "focus-column-right" }
 
 [[page.button]]
 pos = 7
 label = "Maximize"
+icon = "view-fullscreen"
 on_press = { type = "niri", action = "maximize-column" }
 
 [[page.button]]
@@ -93,14 +96,14 @@ name = "apps"
 [[page.button]]
 pos = 0
 label = "Back"
-icon = "go-previous"
+icon = "draw-arrow-back"
 on_press = { type = "page", back = true }
 
 [[page.button]]
 pos = 1
 label = "Discord"
 icon = "discord"
-on_press = { type = "exec", cmd = "discord" }
+on_press = { type = "url", url = "https://discord.com/channels/@me" }
 
 [page.wide_tile]
 mode = "clock"
