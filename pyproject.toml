@@ -23,6 +23,7 @@ dependencies = [
     "construct~=2.10",
     "pydantic>=2",
     "pillow>=10",
+    "cairosvg>=2.7",
     "psutil>=5.9",
     "watchfiles>=0.21",
     "deepdiff>=7",

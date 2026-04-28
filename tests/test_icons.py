@@ -56,6 +56,28 @@ def test_resolve_returns_none_when_missing(tmp_path: Path, isolated_icon_search)
         assert resolve_icon_path("nope") is None
 
 
+def test_resolve_finds_svg(tmp_path: Path, isolated_icon_search) -> None:
+    root = tmp_path / "icons"
+    _make_icon(root / "breeze" / "actions" / "16" / "arrow-left.svg")
+
+    with patch("ulanzi_niri.icons._system_icon_roots", return_value=(root,)):
+        hit = resolve_icon_path("arrow-left")
+    assert hit is not None
+    assert hit.suffix == ".svg"
+
+
+def test_svg_outranks_raster_regardless_of_size(tmp_path: Path, isolated_icon_search) -> None:
+    """SVGs scale arbitrarily so they should win even against large PNGs."""
+    root = tmp_path / "icons"
+    _make_icon(root / "hicolor" / "512x512" / "apps" / "thing.png")
+    _make_icon(root / "breeze" / "actions" / "16" / "thing.svg")
+
+    with patch("ulanzi_niri.icons._system_icon_roots", return_value=(root,)):
+        hit = resolve_icon_path("thing")
+    assert hit is not None
+    assert hit.suffix == ".svg"
+
+
 def test_render_request_key_changes_with_mtime() -> None:
     a = RenderRequest(label="x", icon="i", width=10, height=10, icon_path="/p", icon_mtime=1.0)
     b = RenderRequest(label="x", icon="i", width=10, height=10, icon_path="/p", icon_mtime=2.0)

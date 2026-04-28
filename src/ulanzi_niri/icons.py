@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import io
 import logging
 import os
 import re
@@ -24,7 +25,10 @@ log = logging.getLogger(__name__)
 
 
 _SIZE_RE = re.compile(r"(\d+)x(\d+)")
-_ICON_EXTENSIONS = (".png", ".xpm")  # SVG omitted (no cairosvg dep)
+_ICON_EXTENSIONS = (".png", ".xpm", ".svg")
+# Effective size used to rank SVG matches in _walk_for_icon. SVGs scale
+# arbitrarily, so prefer them over any reasonably-sized raster.
+_SVG_RANK_SIZE = 1 << 20
 
 
 def _cache_root() -> Path:
@@ -83,9 +87,10 @@ def _walk_for_icon(root: Path, candidate_basenames: Iterable[str]) -> Path | Non
         d = Path(dirpath)
         size = _infer_size(d)
         for name in hits:
-            if size > best_size:
+            effective = _SVG_RANK_SIZE if name.endswith(".svg") else size
+            if effective > best_size:
                 best = d / name
-                best_size = size
+                best_size = effective
     return best
 
 
@@ -101,18 +106,20 @@ def resolve_icon_path(name: str) -> Path | None:
        ``/usr/share/icons``, ``/usr/share/pixmaps``.
 
     Names containing a ``.`` are treated as literal filenames. Bare names
-    are resolved against ``<name>.png`` then ``<name>.xpm`` and the
-    highest-resolution hit is returned (SVG is intentionally not supported).
+    are resolved against ``<name>.png``, ``<name>.xpm`` then ``<name>.svg``
+    and the highest-resolution hit is returned. SVG matches are ranked
+    above any raster size so a vector icon wins when both are available.
     """
-    for base in (_user_icons_dir(), _bundled_icons_dir()):
-        p = base / name
-        if p.is_file():
-            return p
-
     if "." in name:
         candidates = (name,)
     else:
         candidates = tuple(f"{name}{ext}" for ext in _ICON_EXTENSIONS)
+
+    for base in (_user_icons_dir(), _bundled_icons_dir()):
+        for cand in (name, *candidates):
+            p = base / cand
+            if p.is_file():
+                return p
 
     for root in _system_icon_roots():
         hit = _walk_for_icon(root, candidates)
@@ -158,6 +165,46 @@ def _hex_to_rgb(value: str) -> tuple[int, int, int]:
     return (int(value[0:2], 16), int(value[2:4], 16), int(value[4:6], 16))
 
 
+def _normalize_hex(value: str) -> str:
+    """Return a ``#RRGGBB`` string for use inside SVG/CSS."""
+    v = value.strip().lstrip("#")
+    return f"#{v}" if len(v) == 6 else "#FFFFFF"
+
+
+# Matches ``color: #abc`` or ``color:#aabbcc`` inside SVG <style> blocks
+# (notably KDE/breeze's ``.ColorScheme-Text { color:#232629; }`` pattern).
+_SVG_COLOR_DECL_RE = re.compile(r"color\s*:\s*#[0-9a-fA-F]{3,8}")
+
+
+def _recolor_svg(data: bytes, color_hex: str) -> bytes:
+    """Force ``data`` (an SVG document) to render in ``color_hex``.
+
+    Many freedesktop icon themes (notably breeze) draw glyphs with
+    ``fill="currentColor"`` and define ``currentColor`` via a near-black
+    ``.ColorScheme-Text`` style block. On a black tile that renders as
+    invisible. This rewrites both forms so the icon picks up the label
+    color instead.
+    """
+    text = data.decode("utf-8", errors="replace")
+    text = text.replace("currentColor", color_hex)
+    text = _SVG_COLOR_DECL_RE.sub(f"color:{color_hex}", text)
+    return text.encode("utf-8")
+
+
+def _load_icon_image(path: str, target_h: int, color_hex: str) -> Image.Image:
+    """Open ``path`` as RGBA. SVGs are rasterized at ``target_h`` via cairosvg
+    and recolored to ``color_hex`` so themed glyphs remain visible on the
+    tile background."""
+    if path.lower().endswith(".svg"):
+        import cairosvg
+
+        with open(path, "rb") as fh:
+            svg = _recolor_svg(fh.read(), color_hex)
+        png_bytes = cairosvg.svg2png(bytestring=svg, output_height=target_h)
+        return Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+    return Image.open(path).convert("RGBA")
+
+
 def render(req: RenderRequest) -> bytes:
     """Render a button to PNG bytes."""
     img = Image.new("RGB", (req.width, req.height), _hex_to_rgb(req.bg_color))
@@ -165,14 +212,14 @@ def render(req: RenderRequest) -> bytes:
 
     if req.icon_path:
         try:
-            icon = Image.open(req.icon_path).convert("RGBA")
             target_h = int(req.height * (0.6 if req.show_title and req.label else 0.85))
+            icon = _load_icon_image(req.icon_path, target_h, _normalize_hex(req.label_color))
             target_w = min(req.width - 16, int(icon.width * (target_h / icon.height)))
             icon = icon.resize((max(1, target_w), max(1, target_h)), Image.LANCZOS)
             x = (req.width - icon.width) // 2
             y = 8 if req.show_title and req.label else (req.height - icon.height) // 2
             img.paste(icon, (x, y), icon)
-        except (OSError, ValueError) as exc:
+        except (OSError, ValueError, ImportError) as exc:
             log.warning("failed to load icon %s: %s", req.icon_path, exc)
 
     if req.show_title and req.label:
@@ -187,8 +234,6 @@ def render(req: RenderRequest) -> bytes:
         else:  # bottom
             y = req.height - th - 18 - bbox[1]
         draw.text((x, y), req.label, font=font, fill=_hex_to_rgb(req.label_color))
-
-    import io
 
     buf = io.BytesIO()
     img.save(buf, format="PNG")
