@@ -22,7 +22,7 @@ from .config import (
 )
 from .pages import PageSet
 from .protocol.device import DeckEvent, DeckEventKind
-from .protocol.manager import wait_for_device
+from .protocol.manager import open_device
 from .protocol.ulanzi_d200x import (
     WIDE_TILE_POS,
     UlanziD200XDevice,
@@ -78,7 +78,9 @@ class Service:
     # ------------------------------------------------------------------ device cycle
     async def _connect_and_serve(self) -> None:
         log.info("waiting for device")
-        device = await asyncio.get_running_loop().run_in_executor(None, wait_for_device)
+        device = await self._wait_for_device_async()
+        if device is None:
+            return  # stop requested
         self._device = device
         log.info("device opened: %s", device.DECK_NAME)
         try:
@@ -91,6 +93,19 @@ class Service:
             device.close()
             self._device = None
 
+    async def _wait_for_device_async(self, poll_interval: float = 1.0) -> UlanziD200XDevice | None:
+        loop = asyncio.get_running_loop()
+        while not self._stop.is_set():
+            dev = await loop.run_in_executor(None, open_device)
+            if dev is not None:
+                return dev
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=poll_interval)
+                return None  # stop fired
+            except TimeoutError:
+                continue
+        return None
+
     async def _initial_push(self) -> None:
         assert self._device is not None
         await self._device.set_brightness(self._brightness, force=True)
@@ -100,10 +115,26 @@ class Service:
 
     async def _event_loop(self) -> None:
         assert self._device is not None
-        async for event in self._device:
-            if self._stop.is_set():
-                break
-            await self._handle_event(event)
+        device = self._device
+        stop_task = asyncio.create_task(self._stop.wait())
+        try:
+            it = device.__aiter__()
+            while not self._stop.is_set():
+                next_task = asyncio.create_task(it.__anext__())
+                done, _pending = await asyncio.wait(
+                    {next_task, stop_task}, return_when=asyncio.FIRST_COMPLETED
+                )
+                if stop_task in done:
+                    next_task.cancel()
+                    return
+                try:
+                    event = next_task.result()
+                except StopAsyncIteration:
+                    return
+                await self._handle_event(event)
+        finally:
+            if not stop_task.done():
+                stop_task.cancel()
 
     # ------------------------------------------------------------------ rendering
     async def _render_current_page(self) -> None:

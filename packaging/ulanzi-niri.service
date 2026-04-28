@@ -9,6 +9,8 @@ Type=simple
 ExecStart=%h/.local/bin/ulanzi-niri run
 Restart=on-failure
 RestartSec=3
+TimeoutStopSec=5
+KillMode=mixed
 # Lightweight hardening; the daemon needs hidraw + the user session bus
 NoNewPrivileges=true
 PrivateTmp=true
