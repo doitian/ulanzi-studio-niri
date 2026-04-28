@@ -39,6 +39,13 @@ icon = "firefox"
 on_press = { type = "exec", cmd = "firefox" }
 
 [[page.button]]
+pos = 10
+label = "Voice"
+icon = "audio-input-microphone"
+# Toggle hyprwhspr recording (voice input).
+on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
+
+[[page.button]]
 pos = 4
 label = "Apps"
 icon = "applications-other"
