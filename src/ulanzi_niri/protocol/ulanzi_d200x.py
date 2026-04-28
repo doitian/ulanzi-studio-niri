@@ -251,63 +251,29 @@ class UlanziD200XDevice(DeckDevice):
 
         return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=data, extras={"cmd": cmd})]
 
-    # The button payload format follows strmdck's D200 layout for LCD presses:
-    #   state:u8 | index:u8 | const 0x01 | pressed:u8
-    # Encoder and plain-button events are best-guess and will be refined via
-    # the `sniff` tooling against the real device.
+    # Button payload layout (confirmed for LCD + wide tile):
+    #   state:u8 | index:u8 | const 0x01 | pressed:u8 | ...
+    #
+    # v0 limitation: the firmware does not stream events for the two extra
+    # hardware buttons (pos 14, 15) or the three rotary encoders (rotate or
+    # press) on interface 0 after a manifest is pushed; they also do not
+    # appear on the boot-keyboard interface 1. Reverse-engineering of the
+    # opcode required to enable that streaming is a TODO. Any unexpected
+    # frame is surfaced as UNKNOWN with the raw bytes preserved.
     def _parse_button(self, body: bytes, *, raw: bytes) -> list[DeckEvent]:
         if len(body) < 4:
             return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=raw)]
         state, index, marker, value = body[0], body[1], body[2], body[3]
 
-        # LCD press/release (marker == 0x01): index 0..13 -> pos 0..13
-        if marker == 0x01 and index < (LCD_BUTTON_COUNT + 1):
-            pos = index
+        # LCD + wide-tile press/release: index 0..13 -> pos 0..13
+        if marker == 0x01 and index <= WIDE_TILE_POS:
             return [
                 DeckEvent(
                     kind=DeckEventKind.LCD_BUTTON,
-                    pos=pos,
+                    pos=index,
                     pressed=bool(value),
                     raw=raw,
                     extras={"state": state},
-                )
-            ]
-
-        # Best-guess for extras: marker == 0x02 -> plain button index 0..1
-        if marker == 0x02 and index < EXTRA_BUTTON_COUNT:
-            return [
-                DeckEvent(
-                    kind=DeckEventKind.EXTRA_BUTTON,
-                    pos=EXTRA_BUTTON_POS_BASE + index,
-                    pressed=bool(value),
-                    raw=raw,
-                    extras={"state": state, "guess": True},
-                )
-            ]
-
-        # Best-guess for encoder rotation: marker == 0x03 -> signed delta in `value`
-        if marker == 0x03 and index < ENCODER_COUNT:
-            delta = value if value < 0x80 else value - 0x100
-            return [
-                DeckEvent(
-                    kind=DeckEventKind.ENCODER_ROTATE,
-                    encoder_index=index,
-                    delta=delta,
-                    raw=raw,
-                    extras={"state": state, "guess": True},
-                )
-            ]
-
-        # Best-guess for encoder press: marker == 0x04
-        if marker == 0x04 and index < ENCODER_COUNT:
-            return [
-                DeckEvent(
-                    kind=DeckEventKind.ENCODER_PRESS,
-                    encoder_index=index,
-                    pos=ENCODER_PRESS_POS_BASE + index,
-                    pressed=bool(value),
-                    raw=raw,
-                    extras={"state": state, "guess": True},
                 )
             ]
 

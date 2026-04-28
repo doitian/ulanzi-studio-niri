@@ -5,8 +5,8 @@
 #   pos  0..4   row 0 LCD (5 buttons)
 #   pos  5..9   row 1 LCD (5 buttons)
 #   pos 10..12  row 2 LCD (3 buttons; pos 13 is the wide tile)
-#   pos 14..15  plain hardware buttons
-#   pos 16..18  encoder presses (you generally use [[page.encoder]] instead)
+#   pos 14..15  plain hardware buttons    -- v0: bindings inert (events not decoded yet)
+#   pos 16..18  encoder presses           -- v0: bindings inert (events not decoded yet)
 
 [device]
 brightness = 70

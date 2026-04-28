@@ -73,6 +73,15 @@ uv run ruff check .             # lint
 
 ## Status
 
+**v0 limitations** — only the 13 LCD buttons and the wide tile (pos 13) emit
+events on the device's HID interface after a manifest is pushed. The two
+plain hardware buttons (pos 14, 15) and the three rotary encoders (rotate
+and click) are silent on both HID interfaces; the opcode required to enable
+their input stream has not yet been reverse-engineered. Bindings on those
+controls are accepted by the config loader but will not fire — a warning is
+logged at startup. Help wanted: a USB capture from the official Ulanzi
+software (Windows/macOS) while pressing those controls would unblock this.
+
 Wide-tile `mode = "encoders"` is **experimental**: the wire format is a
 best-guess until verified against a packet capture from the official Ulanzi
 software. It must be enabled with `experimental = true`.
