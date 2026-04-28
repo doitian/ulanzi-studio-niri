@@ -47,8 +47,8 @@ on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
 
 [[page.button]]
 pos = 4
-label = "Apps"
-icon = "applications-other"
+label = "Web"
+icon = "applications-internet"
 on_press = { type = "page", goto = "apps" }
 
 [[page.button]]
