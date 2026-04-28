@@ -28,6 +28,7 @@ from ..config import (
     PageAction,
     ScreenshotAction,
     SmallWindowAction,
+    UrlAction,
 )
 
 if TYPE_CHECKING:
@@ -102,6 +103,8 @@ async def dispatch(action: Action | None, ctx: ActionContext) -> None:
             await _do_niri(action)
         elif isinstance(action, ExecAction):
             await _do_exec(action)
+        elif isinstance(action, UrlAction):
+            await _do_url(action)
         elif isinstance(action, MediaAction):
             await _do_media(action)
         elif isinstance(action, ScreenshotAction):
@@ -141,6 +144,14 @@ async def _do_exec(action: ExecAction) -> None:
     if not argv:
         return
     await _run_argv(argv, env=action.env)
+
+
+async def _do_url(action: UrlAction) -> None:
+    opener = action.opener or "xdg-open"
+    if not shutil.which(opener):
+        log.error("url opener not found: %s", opener)
+        return
+    await _run_argv([opener, action.url])
 
 
 async def _do_media(action: MediaAction) -> None:

@@ -73,3 +73,32 @@ def test_duplicate_default_rejected() -> None:
             default = true
             """
         )
+
+
+def test_url_action_parses() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.button]]
+        pos = 0
+        on_press = { type = "url", url = "https://discord.com/channels/@me" }
+        """
+    )
+    btn = cfg.page[0].button[0]
+    assert btn.on_press is not None
+    assert btn.on_press.type == "url"
+    assert btn.on_press.url == "https://discord.com/channels/@me"
+
+
+def test_url_action_requires_scheme() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.button]]
+            pos = 0
+            on_press = { type = "url", url = "discord.com" }
+            """
+        )

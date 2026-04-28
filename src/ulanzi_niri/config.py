@@ -45,6 +45,22 @@ class ExecAction(_ActionBase):
     env: dict[str, str] = Field(default_factory=dict)
 
 
+class UrlAction(_ActionBase):
+    type: Literal["url"]
+    url: str
+    opener: str | None = None  # override; defaults to xdg-open
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("url must not be empty")
+        if "://" not in v and not v.startswith("mailto:"):
+            raise ValueError(f"url {v!r} must include a scheme (e.g. https://)")
+        return v
+
+
 class MediaAction(_ActionBase):
     type: Literal["media"]
     cmd: Literal[
@@ -98,7 +114,7 @@ class SmallWindowAction(_ActionBase):
 
 
 Action = Annotated[
-    NoopAction | NiriAction | ExecAction | MediaAction | ScreenshotAction | KeysAction | PageAction | BrightnessAction | SmallWindowAction,
+    NoopAction | NiriAction | ExecAction | UrlAction | MediaAction | ScreenshotAction | KeysAction | PageAction | BrightnessAction | SmallWindowAction,
     Field(discriminator="type"),
 ]
 
