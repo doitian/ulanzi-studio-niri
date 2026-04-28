@@ -83,9 +83,10 @@ def build_buttons_zip(
         button = by_pos.get(pos)
         view: dict = {}
         if button is not None:
-            if button.label:
-                view["Text"] = button.label
-            if button.icon:
+            # Note: we do not emit "Text" here. Our PIL renderer bakes the
+            # label into the PNG; the firmware's label-style overlay would
+            # otherwise draw a second copy on top of ours.
+            if button.icon or button.label:
                 req = request_from_button(
                     button.label, button.icon, geom.width, geom.height, label_cfg
                 )

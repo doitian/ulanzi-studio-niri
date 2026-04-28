@@ -11,12 +11,13 @@ Restart=on-failure
 RestartSec=3
 TimeoutStopSec=5
 KillMode=mixed
-# Lightweight hardening; the daemon needs hidraw + the user session bus
+# This daemon's job is to spawn arbitrary user applications (kitty,
+# firefox, niri msg, ...). Sandboxing flags such as ProtectHome= and
+# ProtectSystem= are inherited by child processes via the mount
+# namespace, which breaks any spawned app that needs to write to
+# $HOME or /tmp (e.g. kitty's effective-config cache). Keep only
+# NoNewPrivileges, which does not affect filesystem visibility.
 NoNewPrivileges=true
-PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
-ReadWritePaths=%h/.cache/ulanzi-niri
 Environment=ULANZI_NIRI_LOG=INFO
 
 [Install]
