@@ -61,6 +61,22 @@ systemctl --user enable --now ulanzi-niri
 Configuration lives at `~/.config/ulanzi-niri/config.toml`. See
 [`examples/config.toml`](examples/config.toml).
 
+### Icons
+
+Icon names in `[[page.button]]` are resolved in this order, first match
+wins:
+
+1. `~/.config/ulanzi-niri/icons/<name>` — your own overrides
+2. `<install>/assets/icons/<name>` — bundled icons (if any)
+3. `~/.local/share/icons/`, `/usr/share/icons/`, `/usr/share/pixmaps/` —
+   freedesktop icon directories, searched recursively
+
+A name with an extension (`firefox.png`) matches that filename anywhere
+under the search roots. A bare name (`firefox`) matches `firefox.png` or
+`firefox.xpm`, preferring the largest available pixel size (parsed from
+`NxN` directory components). SVG icons are not currently supported — drop
+a PNG into `~/.config/ulanzi-niri/icons/` for SVG-only themes.
+
 ## Development
 
 ```sh

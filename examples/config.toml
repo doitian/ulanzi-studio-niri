@@ -29,13 +29,13 @@ default = true
 [[page.button]]
 pos = 0
 label = "Term"
-icon = "terminal.png"
+icon = "kitty"            # bare name -> freedesktop lookup (kitty.png)
 on_press = { type = "exec", cmd = "kitty" }
 
 [[page.button]]
 pos = 1
 label = "Browser"
-icon = "browser.png"
+icon = "firefox"          # bare name -> freedesktop lookup (firefox.png)
 on_press = { type = "exec", cmd = "firefox" }
 
 [[page.button]]
