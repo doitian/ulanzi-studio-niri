@@ -104,15 +104,15 @@ def test_parse_encoder_press_release() -> None:
 
 def test_parse_encoder_rotate() -> None:
     dev = _device()
-    [cw] = dev._parse_input(_button_packet(0x01, 0x11, 0x02, 0x02))
-    assert cw.kind == DeckEventKind.ENCODER_ROTATE
-    assert cw.encoder_index == 0
-    assert cw.delta == 1
-
-    [ccw] = dev._parse_input(_button_packet(0x01, 0x13, 0x02, 0x03))
+    [ccw] = dev._parse_input(_button_packet(0x01, 0x11, 0x02, 0x02))
     assert ccw.kind == DeckEventKind.ENCODER_ROTATE
-    assert ccw.encoder_index == 2
+    assert ccw.encoder_index == 0
     assert ccw.delta == -1
+
+    [cw] = dev._parse_input(_button_packet(0x01, 0x13, 0x02, 0x03))
+    assert cw.kind == DeckEventKind.ENCODER_ROTATE
+    assert cw.encoder_index == 2
+    assert cw.delta == 1
 
 
 def test_parse_unknown_marker_falls_back() -> None:
