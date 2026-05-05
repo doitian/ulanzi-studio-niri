@@ -110,6 +110,7 @@ def resolve_icon_path(name: str) -> Path | None:
     and the highest-resolution hit is returned. SVG matches are ranked
     above any raster size so a vector icon wins when both are available.
     """
+    candidates: tuple[str, ...]
     if "." in name:
         candidates = (name,)
     else:
@@ -215,7 +216,7 @@ def render(req: RenderRequest) -> bytes:
             target_h = int(req.height * (0.6 if req.show_title and req.label else 0.85))
             icon = _load_icon_image(req.icon_path, target_h, _normalize_hex(req.label_color))
             target_w = min(req.width - 16, int(icon.width * (target_h / icon.height)))
-            icon = icon.resize((max(1, target_w), max(1, target_h)), Image.LANCZOS)
+            icon = icon.resize((max(1, target_w), max(1, target_h)), Image.Resampling.LANCZOS)
             x = (req.width - icon.width) // 2
             y = 8 if req.show_title and req.label else (req.height - icon.height) // 2
             img.paste(icon, (x, y), icon)
@@ -225,14 +226,14 @@ def render(req: RenderRequest) -> bytes:
     if req.show_title and req.label:
         font = _font(req.font_size)
         bbox = draw.textbbox((0, 0), req.label, font=font)
-        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
-        x = (req.width - tw) // 2 - bbox[0]
+        tw, th = int(bbox[2] - bbox[0]), int(bbox[3] - bbox[1])
+        x = (req.width - tw) // 2 - int(bbox[0])
         if req.align == "top":
-            y = 4 - bbox[1]
+            y = 4 - int(bbox[1])
         elif req.align == "middle":
-            y = (req.height - th) // 2 - bbox[1]
+            y = (req.height - th) // 2 - int(bbox[1])
         else:  # bottom
-            y = req.height - th - 18 - bbox[1]
+            y = req.height - th - 18 - int(bbox[1])
         draw.text((x, y), req.label, font=font, fill=_hex_to_rgb(req.label_color))
 
     buf = io.BytesIO()

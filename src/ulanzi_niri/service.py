@@ -191,16 +191,19 @@ class Service:
             return
         ctx = ActionContext(self, self._pages.name, f"button:{pos}")
         loop = asyncio.get_running_loop()
+        state: _PressState | None
         if event.pressed:
             state = _PressState(pressed_at=loop.time())
             self._press_state[pos] = state
             if button.on_long_press is not None:
+                press_state = state
+
                 async def fire_long_press() -> None:
                     try:
                         await asyncio.sleep(button.long_press_ms / 1000.0)
                     except asyncio.CancelledError:
                         return
-                    state.long_press_fired = True
+                    press_state.long_press_fired = True
                     await dispatch(button.on_long_press, ctx)
                 state.long_press_task = asyncio.create_task(fire_long_press())
             else:
@@ -208,7 +211,7 @@ class Service:
                 if button.on_press is not None:
                     await dispatch(button.on_press, ctx)
         else:
-            state = self._press_state.pop(pos, None)
+            state = self._press_state.pop(pos) if pos in self._press_state else None
             if state is not None and state.long_press_task is not None:
                 state.long_press_task.cancel()
             # If long_press is configured, fire on_press at release iff long-press didn't fire
