@@ -40,9 +40,9 @@ on_press = { type = "exec", cmd = "firefox" }
 
 [[page.button]]
 pos = 2
-label = "Cursor"
-icon = "co.anysphere.cursor.png"
-on_press = { type = "exec", cmd = "cursor" }
+label = "Claude"
+icon = "claude-desktop"
+on_press = { type = "exec", cmd = "claude-desktop" }
 
 [[page.button]]
 pos = 3
