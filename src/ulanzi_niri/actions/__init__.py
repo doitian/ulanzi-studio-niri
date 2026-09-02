@@ -36,6 +36,8 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+_background_tasks: set[asyncio.Task[None]] = set()
+
 
 @dataclass
 class ActionContext:
@@ -102,7 +104,12 @@ async def dispatch(action: Action | None, ctx: ActionContext) -> None:
         if isinstance(action, NiriAction):
             await _do_niri(action)
         elif isinstance(action, ExecAction):
-            await _do_exec(action)
+            task = asyncio.create_task(
+                _do_exec_background(action, ctx),
+                name=f"exec:{ctx.source}",
+            )
+            _background_tasks.add(task)
+            task.add_done_callback(_background_tasks.discard)
         elif isinstance(action, UrlAction):
             await _do_url(action)
         elif isinstance(action, MediaAction):
@@ -144,6 +151,13 @@ async def _do_exec(action: ExecAction) -> None:
     if not argv:
         return
     await _run_argv(argv, env=action.env)
+
+
+async def _do_exec_background(action: ExecAction, ctx: ActionContext) -> None:
+    try:
+        await _do_exec(action)
+    except Exception:  # noqa: BLE001
+        log.exception("action failed (source=%s, action=%r)", ctx.source, action)
 
 
 async def _do_url(action: UrlAction) -> None:
