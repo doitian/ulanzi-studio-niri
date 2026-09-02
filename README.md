@@ -25,11 +25,12 @@ provider/window; each renders on the button at its `pos`:
 pos = 1
 provider = "claude"
 account = "you@example.com"  # empty = active account
-limit = "five_hour"          # five_hour | seven_day
+limit = "five_hour"          # five_hour | seven_day | seven_day_fable (Claude)
 label = "Claude 5h"
 ```
 
-Each widget shows the remaining percentage and reset time. All widgets share
+Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
+widget shows the remaining percentage and reset time. All widgets share
 a single `aistat` invocation, refreshed every 30 minutes.
 
 ## Hardware

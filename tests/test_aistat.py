@@ -9,7 +9,7 @@ import json
 from PIL import Image
 
 from ulanzi_niri import aistat
-from ulanzi_niri.aistat import format_reset, render_widget, resolve_limit
+from ulanzi_niri.aistat import _default_label, format_reset, render_widget, resolve_limit
 from ulanzi_niri.config import AistatWidget
 
 PROVIDERS = {
@@ -28,6 +28,12 @@ PROVIDERS = {
                     "seven_day": {
                         "used_percent": 3,
                         "remaining_percent": 97,
+                        "resets_at": "2026-09-03T08:00:00+00:00",
+                        "reset_after_seconds": 99261,
+                    },
+                    "seven_day_fable": {
+                        "used_percent": 2,
+                        "remaining_percent": 98,
                         "resets_at": "2026-09-03T08:00:00+00:00",
                         "reset_after_seconds": 99261,
                     },
@@ -71,6 +77,17 @@ def test_resolve_limit_active_fallback() -> None:
     info = resolve_limit(PROVIDERS, "claude", "", "five_hour")
     assert info is not None
     assert info.remaining_percent == 80
+
+
+def test_resolve_claude_fable_limit() -> None:
+    info = resolve_limit(PROVIDERS, "claude", "", "seven_day_fable")
+    assert info is not None
+    assert info.remaining_percent == 98
+
+
+def test_claude_fable_default_label() -> None:
+    widget = AistatWidget(pos=1, provider="claude", limit="seven_day_fable")
+    assert _default_label(widget) == "clfable"
 
 
 def test_resolve_limit_missing() -> None:

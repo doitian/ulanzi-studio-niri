@@ -180,7 +180,7 @@ mode = "clock"
 # ...
 
 # ----------------------------------------------------------------------- usage page
-# A page that shows remaining Claude/Codex plan usage on four LCD buttons.
+# A page that shows remaining Claude/Codex plan usage on LCD buttons.
 # Requires the `aistat` CLI (github.com/drogers0/aistat). Data is refreshed
 # every 30 minutes via a single `aistat` invocation shared by all widgets.
 # Uncomment this page to enable it — the "Usage" button above points at it.
@@ -188,6 +188,13 @@ mode = "clock"
 # [[page]]
 # name = "usage"
 # layer = "home"
+#
+# [[page.widget]]
+# pos = 0
+# provider = "claude"
+# account = "you@example.com"
+# limit = "seven_day_fable"
+# label = "clfable"
 #
 # [[page.widget]]
 # pos = 1

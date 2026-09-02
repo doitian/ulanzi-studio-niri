@@ -169,8 +169,14 @@ class AistatWidget(BaseModel):
     pos: int
     provider: Literal["claude", "codex"]
     account: str = ""  # empty = the provider's active account
-    limit: Literal["five_hour", "seven_day"]
+    limit: Literal["five_hour", "seven_day", "seven_day_fable"]
     label: str = ""
+
+    @model_validator(mode="after")
+    def _validate_limit(self) -> AistatWidget:
+        if self.limit == "seven_day_fable" and self.provider != "claude":
+            raise ValueError("seven_day_fable limit is only available for the claude provider")
+        return self
 
     @field_validator("pos")
     @classmethod

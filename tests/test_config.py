@@ -185,7 +185,7 @@ def test_page_widget_parses() -> None:
         [[page.widget]]
         pos = 2
         provider = "claude"
-        limit = "seven_day"
+        limit = "seven_day_fable"
         """
     )
     widgets = cfg.page[0].widget
@@ -197,6 +197,7 @@ def test_page_widget_parses() -> None:
     assert widgets[0].label == "Codex 5h"
     assert widgets[1].provider == "claude"
     assert widgets[1].account == ""
+    assert widgets[1].limit == "seven_day_fable"
 
 
 def test_widget_bad_provider_rejected() -> None:
@@ -209,6 +210,20 @@ def test_widget_bad_provider_rejected() -> None:
             pos = 1
             provider = "gemini"
             limit = "five_hour"
+            """
+        )
+
+
+def test_widget_fable_limit_restricted_to_claude() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "codex"
+            limit = "seven_day_fable"
             """
         )
 

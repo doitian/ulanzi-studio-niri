@@ -2,7 +2,7 @@
 
 Reads remaining-plan-usage data from the `aistat` CLI (see
 https://github.com/drogers0/aistat), which reports the remaining percentage
-and reset time for the 5-hour and 7-day windows of each Claude/Codex account.
+and reset time for the usage windows of each Claude/Codex account.
 """
 
 from __future__ import annotations
@@ -124,7 +124,11 @@ def format_reset(seconds: float) -> str:
 
 def _default_label(widget: AistatWidget) -> str:
     prefix = "cl" if widget.provider == "claude" else "cx"
-    short = "5h" if widget.limit == "five_hour" else "1w"
+    short = {
+        "five_hour": "5h",
+        "seven_day": "1w",
+        "seven_day_fable": "fable",
+    }[widget.limit]
     return f"{prefix}{short}"
 
 
