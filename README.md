@@ -13,8 +13,24 @@ Buttons can:
 - Switch between configured pages
 - Adjust deck brightness
 
-The wide bottom-right LCD displays a clock, system stats, or live encoder
-information.
+The wide bottom-right LCD displays a clock (digital or dial, optionally with
+date/weekday), system stats, or live encoder information.
+
+LCD buttons can show remaining Claude/Codex plan usage via the `aistat` CLI
+(`github.com/drogers0/aistat`). Configure one `[[page.widget]]` per
+provider/window; each renders on the button at its `pos`:
+
+```toml
+[[page.widget]]
+pos = 1
+provider = "claude"
+account = "you@example.com"  # empty = active account
+limit = "five_hour"          # five_hour | seven_day
+label = "Claude 5h"
+```
+
+Each widget shows the remaining percentage and reset time. All widgets share
+a single `aistat` invocation, refreshed every 30 minutes.
 
 ## Hardware
 
@@ -60,6 +76,14 @@ systemctl --user enable --now ulanzi-niri
 
 Configuration lives at `~/.config/ulanzi-niri/config.toml`. See
 [`examples/config.toml`](examples/config.toml).
+
+### Pages and layers
+
+Each `[[page]]` belongs to a `layer` (default `"default"`). A `page` action
+with `cycle = 1` / `cycle = -1` moves to the next/previous page *within the
+current layer*, wrapping around. A `goto` (or `toggle`) that targets a page in
+another layer switches layers — use this for "folder" buttons that open a
+multi-page group (e.g. a `"web"` layer with several pages).
 
 ### Icons
 

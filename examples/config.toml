@@ -24,6 +24,7 @@ weight = 80
 # ----------------------------------------------------------------------- main page
 [[page]]
 name = "main"
+layer = "home"
 default = true
 
 [[page.button]]
@@ -107,13 +108,13 @@ on_press = { type = "niri", action = "toggle-overview" }
 
 [[page.button]]
 pos = 14
-label = "Mute"
-on_press = { type = "media", cmd = "mute" }
+label = "Prev"
+on_press = { type = "page", cycle = -1 }
 
 [[page.button]]
 pos = 15
-label = "Play"
-on_press = { type = "media", cmd = "play-pause" }
+label = "Next"
+on_press = { type = "page", cycle = 1 }
 
 [page.wide_tile]
 mode = "stats"
@@ -135,6 +136,7 @@ on_rotate_ccw = { type = "brightness", delta = -5 }
 # ----------------------------------------------------------------------- second page
 [[page]]
 name = "apps"
+layer = "web"
 
 [[page.button]]
 pos = 0
@@ -148,5 +150,82 @@ label = "Discord"
 icon = "discord"
 on_press = { type = "url", url = "https://discord.com/channels/@me" }
 
+[[page.button]]
+pos = 2
+label = "Usage"
+icon = "utilities-system-monitor"
+on_press = { type = "page", goto = "usage" }
+
+[[page.button]]
+pos = 14
+label = "Prev"
+on_press = { type = "page", cycle = -1 }
+
+[[page.button]]
+pos = 15
+label = "Next"
+on_press = { type = "page", cycle = 1 }
+
 [page.wide_tile]
 mode = "clock"
+
+# Pages share a `layer`. `cycle` (buttons 14/15 above) moves between pages
+# *within the current layer*. A button that does `goto` (or `toggle`) to a page
+# in another layer switches layers — e.g. "Web" on the main page jumps into
+# the "web" layer, which can hold several pages:
+#
+# [[page]]
+# name = "apps2"
+# layer = "web"
+# ...
+
+# ----------------------------------------------------------------------- usage page
+# A page that shows remaining Claude/Codex plan usage on four LCD buttons.
+# Requires the `aistat` CLI (github.com/drogers0/aistat). Data is refreshed
+# every 30 minutes via a single `aistat` invocation shared by all widgets.
+# Uncomment this page to enable it — the "Usage" button above points at it.
+#
+# [[page]]
+# name = "usage"
+# layer = "home"
+#
+# [[page.widget]]
+# pos = 1
+# provider = "claude"
+# account = "you@example.com"
+# limit = "five_hour"
+# label = "cl5h"
+#
+# [[page.widget]]
+# pos = 2
+# provider = "claude"
+# account = "you@example.com"
+# limit = "seven_day"
+# label = "cl1w"
+#
+# [[page.widget]]
+# pos = 3
+# provider = "codex"
+# account = "you@example.com"
+# limit = "five_hour"
+# label = "cx5h"
+#
+# [[page.widget]]
+# pos = 4
+# provider = "codex"
+# account = "you@example.com"
+# limit = "seven_day"
+# label = "cx1w"
+#
+# [[page.button]]
+# pos = 14
+# label = "Prev"
+# on_press = { type = "page", cycle = -1 }
+#
+# [[page.button]]
+# pos = 15
+# label = "Next"
+# on_press = { type = "page", cycle = 1 }
+#
+# [page.wide_tile]
+# mode = "time-date"

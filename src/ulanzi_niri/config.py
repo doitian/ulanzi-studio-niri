@@ -88,11 +88,12 @@ class PageAction(_ActionBase):
     goto: str | None = None
     back: bool = False
     toggle: str | None = None
+    cycle: int | None = None  # +1 next page, -1 previous page
 
     @model_validator(mode="after")
     def _validate(self) -> PageAction:
-        if not (self.goto or self.back or self.toggle):
-            raise ValueError("page action requires one of: goto, back=true, toggle")
+        if not (self.goto or self.back or self.toggle or self.cycle):
+            raise ValueError("page action requires one of: goto, back=true, toggle, cycle")
         return self
 
 
@@ -162,11 +163,32 @@ class EncoderEntry(BaseModel):
         return v
 
 
+class AistatWidget(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    pos: int
+    provider: Literal["claude", "codex"]
+    account: str = ""  # empty = the provider's active account
+    limit: Literal["five_hour", "seven_day"]
+    label: str = ""
+
+    @field_validator("pos")
+    @classmethod
+    def _validate_pos(cls, v: int) -> int:
+        if v not in LCD_POS_RANGE:
+            raise ValueError(
+                f"widget pos {v} out of range; valid LCD positions: {sorted(LCD_POS_RANGE)}"
+            )
+        return v
+
+
 class WideTileEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    mode: Literal["clock", "stats", "background"] = "clock"
-    format: str = "%H:%M:%S"
+    mode: Literal[
+        "clock", "dial", "stats", "background", "time-date", "time-weekday", "date-time-weekday"
+    ] = "clock"
+    format: str = "%H:%M:%S"  # strftime for the time portion of clock modes
     image: str | None = None  # for mode=background
     on_press: Action | None = None
 
@@ -181,9 +203,11 @@ class PageConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
+    layer: str = "default"
     default: bool = False
     button: list[ButtonEntry] = Field(default_factory=list)
     encoder: list[EncoderEntry] = Field(default_factory=list)
+    widget: list[AistatWidget] = Field(default_factory=list)
     wide_tile: WideTileEntry | None = None
 
     @field_validator("wide_tile", mode="before")
@@ -210,6 +234,14 @@ class PageConfig(BaseModel):
             if e.index in seen_e:
                 raise ValueError(f"page {self.name!r}: duplicate encoder index {e.index}")
             seen_e.add(e.index)
+        widget_pos = [w.pos for w in self.widget]
+        if len(widget_pos) != len(set(widget_pos)):
+            raise ValueError(f"page {self.name!r}: duplicate widget pos")
+        overlap = seen & set(widget_pos)
+        if overlap:
+            raise ValueError(
+                f"page {self.name!r}: widget pos {sorted(overlap)} overlaps a button pos"
+            )
         return self
 
 
@@ -264,6 +296,24 @@ class Config(BaseModel):
             if p.name == name:
                 return p
         return None
+
+    def pages_in_layer(self, layer: str) -> list[PageConfig]:
+        return [p for p in self.page if p.layer == layer]
+
+    def cycle_target(self, current_name: str, step: int) -> str | None:
+        """Name of the page ``step`` positions from ``current_name`` within its layer.
+
+        ``step = 1`` is next page, ``step = -1`` is previous page. Returns
+        ``None`` when the current page has no layer peers to cycle to.
+        """
+        current = self.get_page(current_name)
+        if current is None:
+            return None
+        peers = self.pages_in_layer(current.layer)
+        names = [p.name for p in peers]
+        if not names or current_name not in names:
+            return None
+        return peers[(names.index(current_name) + step) % len(names)].name
 
 
 # ---------------------------------------------------------------------------- loading

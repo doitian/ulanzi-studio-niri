@@ -115,7 +115,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         else:
             print("device open:   ok")
             dev.close()
-    for tool in ("niri", "playerctl", "wpctl", "grim", "grimblast", "wtype", "ydotool", "slurp"):
+    for tool in ("niri", "playerctl", "wpctl", "grim", "grimblast", "wtype", "ydotool", "slurp", "aistat"):
         from shutil import which
         present = which(tool)
         print(f"  {tool:10}{'present at ' + present if present else 'not found'}")

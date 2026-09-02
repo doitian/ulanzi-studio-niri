@@ -10,8 +10,10 @@ from pathlib import Path
 from watchfiles import awatch
 
 from .actions import ActionContext, dispatch
+from .aistat import fetch_usage, render_widget
 from .config import (
     Config,
+    PageConfig,
     WideTileEntry,
     load_config,
 )
@@ -141,9 +143,22 @@ class Service:
         assert self._device is not None
         page = self._pages.current
         wt_mode = page.wide_tile.mode if page.wide_tile is not None else "clock"
-        blob = build_buttons_zip(page.button, self._cfg.label, wide_tile_mode=wt_mode)
+        widget_images = await self._render_widget_images(page)
+        blob = build_buttons_zip(
+            page.button,
+            self._cfg.label,
+            wide_tile_mode=wt_mode,
+            widget_images=widget_images,
+        )
         await self._device.push_buttons_zip(blob)
         log.info("pushed page %r (%d buttons)", page.name, len(page.button))
+
+    async def _render_widget_images(self, page: PageConfig) -> dict[int, bytes]:
+        if not page.widget:
+            return {}
+        data = await fetch_usage()
+        providers = (data or {}).get("providers", {})
+        return {w.pos: render_widget(w, providers) for w in page.widget}
 
     def _start_wide_tile_worker(self) -> None:
         assert self._device is not None
@@ -151,6 +166,7 @@ class Service:
         cfg = page.wide_tile or WideTileEntry(mode="clock")
         state = WideTileState(
             config=cfg,
+            widgets=page.widget,
         )
         if self._wide is not None:
             self._wide.update_state(state)
@@ -159,6 +175,7 @@ class Service:
             self._device,
             state,
             interval_ms=self._cfg.device.stats_interval_ms,
+            refresh=self._render_current_page,
         )
         self._wide.start()
 
@@ -281,13 +298,9 @@ class Service:
         self._start_wide_tile_worker()
 
     async def cycle_page(self, step: int) -> None:
-        names = [p.name for p in self._cfg.page]
-        try:
-            idx = names.index(self._pages.name)
-        except ValueError:
-            return
-        target = names[(idx + step) % len(names)]
-        await self.switch_page(target)
+        target = self._cfg.cycle_target(self._pages.name, step)
+        if target is not None:
+            await self.switch_page(target)
 
     async def set_brightness(self, value: int) -> None:
         self._brightness = max(0, min(100, int(value)))

@@ -229,6 +229,8 @@ async def _do_page(action: PageAction, ctx: ActionContext) -> None:
         await ctx.service.page_toggle(action.toggle)
     elif action.goto:
         await ctx.service.switch_page(action.goto)
+    elif action.cycle:
+        await ctx.service.cycle_page(action.cycle)
 
 
 async def _do_brightness(action: BrightnessAction, ctx: ActionContext) -> None:

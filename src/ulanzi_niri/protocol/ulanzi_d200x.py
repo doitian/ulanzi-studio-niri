@@ -188,8 +188,12 @@ WIDE_TILE_GEOMETRY = TileGeometry(3, 2, *WIDE_ICON)
 # ---------------------------------------------------------------------------- wide-tile modes
 class SmallWindowMode(IntEnum):
     STATS = 0
-    CLOCK = 1
+    DIAL = 1
     BACKGROUND = 2
+    DATE_TIME_WEEKDAY = 200
+    TIME_WEEKDAY = 201
+    TIME_DATE = 202
+    TIME = 203
 
 
 # ---------------------------------------------------------------------------- device class

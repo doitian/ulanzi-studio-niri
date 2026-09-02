@@ -73,6 +73,7 @@ def build_buttons_zip(
     *,
     workdir: Path | None = None,
     wide_tile_mode: str | None = None,
+    widget_images: dict[int, bytes] | None = None,
 ) -> bytes:
     """Build the buttons ZIP blob; safe for the firmware's packet alignment.
 
@@ -80,6 +81,10 @@ def build_buttons_zip(
     solid-black 458x196 tile is injected at manifest key ``3_2`` so the
     firmware overwrites any leftover wide-tile background image. The text-mode
     payload (clock/stats/encoders) is then composited cleanly on top.
+
+    ``widget_images`` maps button positions to pre-rendered PNG bytes (e.g.
+    usage widgets); those positions get the supplied image instead of the
+    label/icon render.
     """
     workdir = workdir or Path(tempfile.mkdtemp(prefix="ulanzi-build-"))
     page_dir = workdir / "page"
@@ -90,24 +95,28 @@ def build_buttons_zip(
 
     manifest: dict[str, dict] = {}
     by_pos = {b.pos: b for b in buttons}
+    widget_images = widget_images or {}
 
     for pos, geom in BUTTON_GEOMETRY.items():
         button = by_pos.get(pos)
         view: dict = {}
-        if button is not None:
+        if pos in widget_images:
+            arc_name = f"widget-{pos}.png"
+            (icons_dir / arc_name).write_bytes(widget_images[pos])
+            view["Icon"] = f"icons/{arc_name}"
+        elif button is not None and (button.icon or button.label):
             # Note: we do not emit "Text" here. Our PIL renderer bakes the
             # label into the PNG; the firmware's label-style overlay would
             # otherwise draw a second copy on top of ours.
-            if button.icon or button.label:
-                req = request_from_button(
-                    button.label, button.icon, geom.width, geom.height, label_cfg
-                )
-                cached = render_cached(req)
-                arc_name = f"{cached.name}"
-                target = icons_dir / arc_name
-                if not target.exists():
-                    shutil.copyfile(cached, target)
-                view["Icon"] = f"icons/{arc_name}"
+            req = request_from_button(
+                button.label, button.icon, geom.width, geom.height, label_cfg
+            )
+            cached = render_cached(req)
+            arc_name = f"{cached.name}"
+            target = icons_dir / arc_name
+            if not target.exists():
+                shutil.copyfile(cached, target)
+            view["Icon"] = f"icons/{arc_name}"
         manifest[f"{geom.col}_{geom.row}"] = {
             "State": 0,
             "ViewParam": [view],
@@ -115,6 +124,7 @@ def build_buttons_zip(
 
     if wide_tile_mode is not None and wide_tile_mode != "background":
         wgeom = WIDE_TILE_GEOMETRY
+        key = f"{wgeom.col}_{wgeom.row}"
         req = RenderRequest(
             label="",
             icon=None,
@@ -127,10 +137,7 @@ def build_buttons_zip(
         target = icons_dir / cached.name
         if not target.exists():
             shutil.copyfile(cached, target)
-        manifest[f"{wgeom.col}_{wgeom.row}"] = {
-            "State": 0,
-            "ViewParam": [{"Icon": f"icons/{cached.name}"}],
-        }
+        manifest[key] = {"State": 0, "ViewParam": [{"Icon": f"icons/{cached.name}"}]}
 
     (page_dir / "manifest.json").write_text(
         json.dumps(manifest, sort_keys=True, separators=(",", ":"), indent=2)
