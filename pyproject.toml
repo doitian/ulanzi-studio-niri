@@ -25,6 +25,7 @@ dependencies = [
     "pillow>=10",
     "cairosvg>=2.7",
     "psutil>=5.9",
+    "nvidia-ml-py>=11",
     "watchfiles>=0.21",
     "deepdiff>=7",
 ]
