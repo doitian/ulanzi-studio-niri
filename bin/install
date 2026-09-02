@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Installs ulanzi-studio-niri for the current user:
+#   1. `uv tool install` -> ~/.local/bin/ulanzi-niri
+#   2. udev rule (via sudo) -> /etc/udev/rules.d/
+#   3. config link (if config/$(hostname).toml exists)
+#   4. systemd user service -> enable + start
+#
+# Safe to re-run; each step is idempotent.
+
+repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+bin_name="ulanzi-niri"
+rules_src="${repo_dir}/src/ulanzi_niri/data/70-ulanzi-d200x.rules"
+rules_dst="/etc/udev/rules.d/70-ulanzi-d200x.rules"
+config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/ulanzi-niri"
+host_config="${repo_dir}/config/$(hostname).toml"
+service_src="${repo_dir}/packaging/ulanzi-niri.service"
+service_dst="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/ulanzi-niri.service"
+
+say() { printf '\033[1;32m==>\033[0m %s\n' "$*"; }
+die() { printf '\033[1;31merror:\033[0m %s\n' "$*" >&2; exit 1; }
+
+command -v uv >/dev/null 2>&1 || die "uv not found; install it from https://github.com/astral-sh/uv"
+
+say "Installing ${bin_name} via uv tool"
+(
+  cd "${repo_dir}"
+  uv tool install --force .
+)
+command -v "${bin_name}" >/dev/null 2>&1 || die "install failed: ${bin_name} not on PATH"
+
+say "Installing udev rule"
+if [[ -f "${rules_dst}" ]] && cmp -s "${rules_src}" "${rules_dst}"; then
+  echo "  already up to date: ${rules_dst}"
+else
+  sudo tee "${rules_dst}" >/dev/null <"${rules_src}"
+  sudo udevadm control --reload-rules
+  sudo udevadm trigger --subsystem-match=hidraw
+fi
+
+if ! id -nG "$(id -un)" | tr ' ' '\n' | grep -qx input; then
+  say "Adding $(id -un) to the input group (log out/in to take effect)"
+  sudo usermod -aG input "$(id -un)"
+fi
+
+say "Linking config"
+if [[ -f "${host_config}" ]]; then
+  mkdir -p "${config_dir}"
+  ln -sfn "${host_config}" "${config_dir}/config.toml"
+  echo "  ${config_dir}/config.toml -> ${host_config}"
+else
+  echo "  no config/$(hostname).toml found; skipping"
+fi
+
+say "Installing systemd user service"
+mkdir -p "$(dirname "${service_dst}")"
+if [[ -f "${service_dst}" ]] && cmp -s "${service_src}" "${service_dst}"; then
+  echo "  already up to date: ${service_dst}"
+else
+  cp "${service_src}" "${service_dst}"
+fi
+systemctl --user daemon-reload
+systemctl --user enable --now ulanzi-niri
+
+say "Done. Replug the deck, then run \`${bin_name} doctor\` to verify."

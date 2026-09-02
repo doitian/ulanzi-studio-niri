@@ -54,6 +54,13 @@ uv sync
 uv tool install .
 ```
 
+Or run the one-shot installer, which performs the tool install, udev rule,
+and systemd service setup together:
+
+```sh
+./bin/install
+```
+
 ### udev rule (required)
 
 Out of the box the deck's `hidraw` nodes are owned by root. Install the udev
