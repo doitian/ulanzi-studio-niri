@@ -234,5 +234,11 @@ mode = "clock"
 # label = "Next"
 # on_press = { type = "page", cycle = 1 }
 #
+# [[page.button]]
+# pos = 12 # 13th regular LCD button (zero-based)
+# label = "Refresh"
+# icon = "view-refresh"
+# on_press = { type = "page", goto = "usage" }
+#
 # [page.wide_tile]
 # mode = "time-date"
