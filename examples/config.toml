@@ -195,6 +195,7 @@ mode = "clock"
 # account = "you@example.com"
 # limit = "seven_day_fable"
 # label = "clfable"
+# background = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 1
@@ -202,6 +203,7 @@ mode = "clock"
 # account = "you@example.com"
 # limit = "five_hour"
 # label = "cl5h"
+# background = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 2
@@ -209,6 +211,7 @@ mode = "clock"
 # account = "you@example.com"
 # limit = "seven_day"
 # label = "cl1w"
+# background = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 3
@@ -216,6 +219,7 @@ mode = "clock"
 # account = "you@example.com"
 # limit = "five_hour"
 # label = "cx5h"
+# background = "chatgpt"
 #
 # [[page.widget]]
 # pos = 4
@@ -223,6 +227,7 @@ mode = "clock"
 # account = "you@example.com"
 # limit = "seven_day"
 # label = "cx1w"
+# background = "chatgpt"
 #
 # [[page.button]]
 # pos = 14

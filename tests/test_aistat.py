@@ -130,6 +130,42 @@ def test_render_widget_missing_data() -> None:
     assert Image.open(io.BytesIO(png)).size == (196, 196)
 
 
+def test_render_widget_background_icon(tmp_path, monkeypatch) -> None:
+    icon = tmp_path / "app.png"
+    Image.new("RGB", (64, 64), (255, 255, 255)).save(icon)
+
+    widget = AistatWidget(
+        pos=1,
+        provider="claude",
+        account="",
+        limit="five_hour",
+        label="Claude 5h",
+        background="app",
+    )
+
+    monkeypatch.setattr(aistat, "resolve_icon_path", lambda _name: str(icon))
+
+    img = Image.open(io.BytesIO(render_widget(widget, PROVIDERS))).convert("RGB")
+    assert img.size == (196, 196)
+    assert img.getpixel((0, 0)) != (0, 0, 0)
+
+
+def test_render_widget_missing_background_falls_back_to_black(monkeypatch) -> None:
+    widget = AistatWidget(
+        pos=1,
+        provider="claude",
+        account="",
+        limit="five_hour",
+        label="Claude 5h",
+        background="nope",
+    )
+
+    monkeypatch.setattr(aistat, "resolve_icon_path", lambda _name: None)
+
+    img = Image.open(io.BytesIO(render_widget(widget, PROVIDERS))).convert("RGB")
+    assert img.getpixel((0, 0)) == (0, 0, 0)
+
+
 class _FakeProc:
     def __init__(self, stdout: bytes, returncode: int = 0) -> None:
         self._stdout = stdout

@@ -15,10 +15,11 @@ from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageEnhance
 
 from .config import AistatWidget
 from .icons import _font as load_font
+from .icons import _load_icon_image, resolve_icon_path
 from .protocol.ulanzi_d200x import STD_ICON
 
 log = logging.getLogger(__name__)
@@ -233,6 +234,36 @@ def _draw_fit(
     _draw_centered(draw, center, text, load_font(min_size), fill)
 
 
+def _cover_fit(icon: Image.Image, size: int) -> Image.Image:
+    """Scale ``icon`` to cover ``size``x``size``, center-cropping the overflow."""
+    scale = max(size / icon.width, size / icon.height)
+    w = max(size, round(icon.width * scale))
+    h = max(size, round(icon.height * scale))
+    icon = icon.resize((w, h), Image.Resampling.LANCZOS)
+    left = (w - size) // 2
+    top = (h - size) // 2
+    return icon.crop((left, top, left + size, top + size))
+
+
+def _load_background_icon(name: str, size: int) -> Image.Image | None:
+    """Resolve, cover-fit, and dim an app icon for use as a widget background."""
+    path = resolve_icon_path(name)
+    if path is None:
+        log.warning("widget background icon %r not found in any search path", name)
+        return None
+    try:
+        icon = _load_icon_image(str(path), size, "#FFFFFF")
+    except (OSError, ValueError, ImportError) as exc:
+        log.warning("failed to load widget background icon %s: %s", path, exc)
+        return None
+    icon = _cover_fit(icon, size)
+    alpha = icon.getchannel("A")
+    dim = ImageEnhance.Brightness(icon.convert("RGB")).enhance(0.35)
+    dim = Image.blend(dim, Image.new("RGB", (size, size), (0, 0, 0)), 0.4)
+    dim.putalpha(alpha)
+    return dim
+
+
 def render_widget(
     widget: AistatWidget,
     providers: dict,
@@ -243,6 +274,10 @@ def render_widget(
 ) -> bytes:
     """Render a single usage widget to a square PNG (default 196x196)."""
     img = Image.new("RGB", (size, size), (0, 0, 0))
+    if widget.background:
+        bg = _load_background_icon(widget.background, size)
+        if bg is not None:
+            img.paste(bg, (0, 0), bg)
     draw = ImageDraw.Draw(img)
 
     info = resolve_limit(providers, widget.provider, widget.account, widget.limit)
