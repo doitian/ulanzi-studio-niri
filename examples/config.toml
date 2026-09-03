@@ -194,40 +194,40 @@ mode = "clock"
 # provider = "claude"
 # account = "you@example.com"
 # limit = "seven_day_fable"
-# label = "clfable"
-# background = "claude-desktop"
+# label = "FABLE"
+# icon = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 1
 # provider = "claude"
 # account = "you@example.com"
 # limit = "five_hour"
-# label = "cl5h"
-# background = "claude-desktop"
+# label = "5H"
+# icon = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 2
 # provider = "claude"
 # account = "you@example.com"
 # limit = "seven_day"
-# label = "cl1w"
-# background = "claude-desktop"
+# label = "7D"
+# icon = "claude-desktop"
 #
 # [[page.widget]]
 # pos = 3
 # provider = "codex"
 # account = "you@example.com"
 # limit = "five_hour"
-# label = "cx5h"
-# background = "chatgpt"
+# label = "5H"
+# icon = "chatgpt"
 #
 # [[page.widget]]
 # pos = 4
 # provider = "codex"
 # account = "you@example.com"
 # limit = "seven_day"
-# label = "cx1w"
-# background = "chatgpt"
+# label = "7D"
+# icon = "chatgpt"
 #
 # [[page.button]]
 # pos = 14

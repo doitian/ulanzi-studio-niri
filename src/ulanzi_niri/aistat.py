@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from enum import Enum
 from io import BytesIO
 
-from PIL import Image, ImageDraw, ImageEnhance
+from PIL import Image, ImageDraw
 
 from .config import AistatWidget
 from .icons import _font as load_font
@@ -298,29 +298,28 @@ def result_auth_denied(data: dict | None) -> bool:
 
 
 def format_reset(seconds: float) -> str:
-    """Humanize a reset countdown to its largest unit, e.g. ``"2d"``, ``"4h"``, ``"now"``."""
+    """Humanize a reset countdown with two units, e.g. ``"1h2m"``, ``"3d4h"``."""
     s = int(seconds)
     if s <= 0:
         return "now"
     if s < 60:
         return "<1m"
     days, rem = divmod(s, 86400)
-    if days:
-        return f"{days}d"
     hours, rem = divmod(rem, 3600)
+    minutes = rem // 60
+    if days:
+        return f"{days}d{hours}h"
     if hours:
-        return f"{hours}h"
-    return f"{rem // 60}m"
+        return f"{hours}h{minutes}m"
+    return f"{minutes}m"
 
 
 def _default_label(widget: AistatWidget) -> str:
-    prefix = "cl" if widget.provider == "claude" else "cx"
-    short = {
-        "five_hour": "5h",
-        "seven_day": "1w",
-        "seven_day_fable": "fable",
+    return {
+        "five_hour": "5H",
+        "seven_day": "7D",
+        "seven_day_fable": "FABLE",
     }[widget.limit]
-    return f"{prefix}{short}"
 
 
 def _draw_centered(
@@ -360,34 +359,21 @@ def _draw_fit(
     _draw_centered(draw, center, text, load_font(min_size), fill)
 
 
-def _cover_fit(icon: Image.Image, size: int) -> Image.Image:
-    """Scale ``icon`` to cover ``size``x``size``, center-cropping the overflow."""
-    scale = max(size / icon.width, size / icon.height)
-    w = max(size, round(icon.width * scale))
-    h = max(size, round(icon.height * scale))
-    icon = icon.resize((w, h), Image.Resampling.LANCZOS)
-    left = (w - size) // 2
-    top = (h - size) // 2
-    return icon.crop((left, top, left + size, top + size))
-
-
-def _load_background_icon(name: str, size: int) -> Image.Image | None:
-    """Resolve, cover-fit, and dim an app icon for use as a widget background."""
+def _load_corner_icon(name: str, size: int) -> Image.Image | None:
+    """Resolve and scale an app icon to fit in a ``size``x``size`` corner."""
     path = resolve_icon_path(name)
     if path is None:
-        log.warning("widget background icon %r not found in any search path", name)
+        log.warning("widget icon %r not found in any search path", name)
         return None
     try:
         icon = _load_icon_image(str(path), size, "#FFFFFF")
     except (OSError, ValueError, ImportError) as exc:
-        log.warning("failed to load widget background icon %s: %s", path, exc)
+        log.warning("failed to load widget icon %s: %s", path, exc)
         return None
-    icon = _cover_fit(icon, size)
-    alpha = icon.getchannel("A")
-    dim = ImageEnhance.Brightness(icon.convert("RGB")).enhance(0.35)
-    dim = Image.blend(dim, Image.new("RGB", (size, size), (0, 0, 0)), 0.4)
-    dim.putalpha(alpha)
-    return dim
+    scale = min(size / icon.width, size / icon.height)
+    w = max(1, round(icon.width * scale))
+    h = max(1, round(icon.height * scale))
+    return icon.resize((w, h), Image.Resampling.LANCZOS)
 
 
 _COLOR_GRAY = (160, 160, 160)
@@ -402,14 +388,10 @@ def render_widget(
     *,
     status: FetchStatus = FetchStatus.OK,
     size: int = WIDGET_SIZE[0],
-    padding: int = 12,
+    padding: int = 20,
 ) -> bytes:
     """Render a single usage widget to a square PNG (default 196x196)."""
     img = Image.new("RGB", (size, size), (0, 0, 0))
-    if widget.background:
-        bg = _load_background_icon(widget.background, size)
-        if bg is not None:
-            img.paste(bg, (0, 0), bg)
     draw = ImageDraw.Draw(img)
 
     info = resolve_limit(providers, widget.provider, widget.account, widget.limit)
@@ -419,7 +401,11 @@ def render_widget(
     cx = size // 2
     max_width = size - 2 * padding
 
-    _draw_fit(draw, (cx, 28), label, 26, (255, 255, 255), max_width)
+    draw.text((padding, padding - 4), label, font=load_font(28), fill=(255, 255, 255))
+    if widget.icon:
+        icon = _load_corner_icon(widget.icon, 40)
+        if icon is not None:
+            img.paste(icon, (size - padding - icon.width, padding), icon)
 
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
@@ -445,11 +431,17 @@ def render_widget(
     else:
         pct = f"{info.remaining_percent:.0f}%"
         color = _COLOR_RED
-    _draw_fit(draw, (cx, size // 2), pct, 48, color, max_width)
+    _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width)
 
     if info is not None:
-        reset = f"resets {format_reset(info.reset_after_seconds)}"
-        _draw_fit(draw, (cx, size - 24), reset, 18, (180, 180, 180), max_width)
+        _draw_fit(
+            draw,
+            (cx, size - 28),
+            format_reset(info.reset_after_seconds),
+            28,
+            (180, 180, 180),
+            max_width,
+        )
 
     buf = BytesIO()
     img.save(buf, format="PNG")

@@ -95,9 +95,10 @@ def test_resolve_claude_fable_limit() -> None:
     assert info.remaining_percent == 98
 
 
-def test_claude_fable_default_label() -> None:
-    widget = AistatWidget(pos=1, provider="claude", limit="seven_day_fable")
-    assert _default_label(widget) == "clfable"
+def test_default_labels() -> None:
+    assert _default_label(AistatWidget(pos=1, provider="claude", limit="five_hour")) == "5H"
+    assert _default_label(AistatWidget(pos=1, provider="codex", limit="seven_day")) == "7D"
+    assert _default_label(AistatWidget(pos=1, provider="claude", limit="seven_day_fable")) == "FABLE"
 
 
 def test_resolve_limit_missing() -> None:
@@ -218,9 +219,9 @@ def test_format_reset() -> None:
     assert format_reset(-5) == "now"
     assert format_reset(53) == "<1m"
     assert format_reset(1461) == "24m"
-    assert format_reset(17666) == "4h"
-    assert format_reset(99261) == "1d"
-    assert format_reset(429381) == "4d"
+    assert format_reset(17666) == "4h54m"
+    assert format_reset(99261) == "1d3h"
+    assert format_reset(429381) == "4d23h"
 
 
 def test_render_widget_dimensions() -> None:
@@ -240,7 +241,7 @@ def test_render_widget_missing_data() -> None:
     assert Image.open(io.BytesIO(png)).size == (196, 196)
 
 
-def test_render_widget_background_icon(tmp_path, monkeypatch) -> None:
+def test_render_widget_corner_icon(tmp_path, monkeypatch) -> None:
     icon = tmp_path / "app.png"
     Image.new("RGB", (64, 64), (255, 255, 255)).save(icon)
 
@@ -249,25 +250,24 @@ def test_render_widget_background_icon(tmp_path, monkeypatch) -> None:
         provider="claude",
         account="",
         limit="five_hour",
-        label="Claude 5h",
-        background="app",
+        icon="app",
     )
 
     monkeypatch.setattr(aistat, "resolve_icon_path", lambda _name: str(icon))
 
     img = Image.open(io.BytesIO(render_widget(widget, PROVIDERS))).convert("RGB")
     assert img.size == (196, 196)
-    assert img.getpixel((0, 0)) != (0, 0, 0)
+    assert img.getpixel((164, 32)) != (0, 0, 0)
+    assert img.getpixel((0, 0)) == (0, 0, 0)
 
 
-def test_render_widget_missing_background_falls_back_to_black(monkeypatch) -> None:
+def test_render_widget_missing_icon_falls_back_to_black(monkeypatch) -> None:
     widget = AistatWidget(
         pos=1,
         provider="claude",
         account="",
         limit="five_hour",
-        label="Claude 5h",
-        background="nope",
+        icon="nope",
     )
 
     monkeypatch.setattr(aistat, "resolve_icon_path", lambda _name: None)

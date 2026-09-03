@@ -27,7 +27,8 @@ pos = 1
 provider = "claude"
 account = "you@example.com"  # empty = active account
 limit = "five_hour"          # five_hour | seven_day | seven_day_fable (Claude)
-label = "Claude 5h"
+label = "5H"
+icon = "claude-desktop"
 ```
 
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each

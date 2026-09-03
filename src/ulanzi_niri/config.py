@@ -175,7 +175,7 @@ class AistatWidget(BaseModel):
     account: str = ""  # empty = the provider's active account
     limit: Literal["five_hour", "seven_day", "seven_day_fable"]
     label: str = ""
-    background: str | None = None  # app icon name dimmed behind the text
+    icon: str | None = None
 
     @model_validator(mode="after")
     def _validate_limit(self) -> AistatWidget:
