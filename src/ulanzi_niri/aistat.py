@@ -10,7 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
+from enum import Enum
 from io import BytesIO
 
 from PIL import Image, ImageDraw
@@ -33,12 +35,73 @@ class AistatLimit:
     reset_after_seconds: float
 
 
-async def fetch_usage(timeout: float = 20.0) -> dict | None:
-    """Run ``aistat usage --refresh`` once and return its parsed JSON.
+class FetchStatus(Enum):
+    OK = "ok"
+    TIMEOUT = "timeout"
+    ERROR = "error"
+
+
+@dataclass
+class UsageFetchResult:
+    status: FetchStatus
+    data: dict | None = None
+
+
+AISTAT_TTL_SECONDS = 90
+
+
+class UsageFetcher:
+    """Serve cached aistat usage and refresh it in the background.
+
+    ``get()`` returns the last known result immediately and never blocks;
+    ``refresh()`` starts a background fetch only when the cache is older than
+    ``ttl`` and no fetch is already in flight. A finished fetch invokes
+    ``on_update`` so callers can repaint with fresh data.
+    """
+
+    def __init__(self, *, ttl: float = AISTAT_TTL_SECONDS) -> None:
+        self._ttl = ttl
+        self._result: UsageFetchResult | None = None
+        self._fetched_at: float | None = None
+        self._task: asyncio.Task | None = None
+        self._on_update: Callable[[], Awaitable[None]] | None = None
+
+    def set_on_update(self, callback: Callable[[], Awaitable[None]]) -> None:
+        self._on_update = callback
+
+    def get(self) -> UsageFetchResult | None:
+        return self._result
+
+    def refresh(self, *, force: bool = False) -> None:
+        if self._task is not None and not self._task.done():
+            return
+        if not force and self._fetched_at is not None:
+            age = asyncio.get_running_loop().time() - self._fetched_at
+            if age < self._ttl:
+                return
+        self._task = asyncio.create_task(self._run())
+
+    async def _run(self) -> None:
+        self._result = await fetch_usage()
+        self._fetched_at = asyncio.get_running_loop().time()
+        log.debug("usage fetch complete: status=%s", self._result.status)
+        callback = self._on_update
+        if callback is not None:
+            try:
+                await callback()
+            except Exception:  # noqa: BLE001
+                log.exception("usage update callback failed")
+
+
+async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
+    """Run ``aistat usage`` once and return its parsed JSON.
+
+    ``--refresh`` is deliberately omitted so the CLI observes its local 90s
+    TTL instead of hitting the API every time (which risks rate-limit errors).
 
     The CLI prints JSON on stdout by default (``--human`` opts into text).
     """
-    argv = ["aistat", "usage", "--refresh"]
+    argv = ["aistat", "usage"]
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
@@ -47,21 +110,22 @@ async def fetch_usage(timeout: float = 20.0) -> dict | None:
         )
     except FileNotFoundError:
         log.error("aistat binary not found on PATH; install it to show usage widgets")
-        return None
+        return UsageFetchResult(FetchStatus.ERROR)
     try:
         out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
         proc.kill()
+        await proc.wait()
         log.error("aistat timed out after %.0fs", timeout)
-        return None
+        return UsageFetchResult(FetchStatus.TIMEOUT)
     if proc.returncode != 0:
         log.warning("aistat exited %d", proc.returncode)
-        return None
+        return UsageFetchResult(FetchStatus.ERROR)
     try:
-        return json.loads(out.decode("utf-8"))
+        return UsageFetchResult(FetchStatus.OK, json.loads(out.decode("utf-8")))
     except (json.JSONDecodeError, UnicodeDecodeError):
         log.warning("aistat returned non-JSON output")
-        return None
+        return UsageFetchResult(FetchStatus.ERROR)
 
 
 def resolve_limit(
@@ -173,6 +237,7 @@ def render_widget(
     widget: AistatWidget,
     providers: dict,
     *,
+    status: FetchStatus = FetchStatus.OK,
     size: int = WIDGET_SIZE[0],
     padding: int = 12,
 ) -> bytes:
@@ -187,7 +252,14 @@ def render_widget(
 
     _draw_fit(draw, (cx, 28), label, 26, (255, 255, 255), max_width)
 
-    pct = "n/a" if info is None else f"{info.remaining_percent:.0f}%"
+    if status is FetchStatus.TIMEOUT:
+        pct = "TO"
+    elif status is FetchStatus.ERROR:
+        pct = "Err"
+    elif info is None:
+        pct = "n/a"
+    else:
+        pct = f"{info.remaining_percent:.0f}%"
     _draw_fit(draw, (cx, size // 2), pct, 48, (255, 255, 255), max_width)
 
     if info is not None:

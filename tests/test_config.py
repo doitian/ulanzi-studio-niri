@@ -269,3 +269,19 @@ def test_wide_tile_time_date_mode_parses() -> None:
     )
     assert cfg.page[0].wide_tile is not None
     assert cfg.page[0].wide_tile.mode == "time-date"
+
+
+def test_refresh_action_parses() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.button]]
+        pos = 12
+        label = "Refresh"
+        on_press = { type = "refresh" }
+        """
+    )
+    action = cfg.page[0].button[0].on_press
+    assert action is not None
+    assert action.type == "refresh"

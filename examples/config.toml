@@ -238,7 +238,7 @@ mode = "clock"
 # pos = 12 # 13th regular LCD button (zero-based)
 # label = "Refresh"
 # icon = "view-refresh"
-# on_press = { type = "page", goto = "usage" }
+# on_press = { type = "refresh" }
 #
 # [page.wide_tile]
 # mode = "time-date"

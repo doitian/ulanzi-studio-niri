@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import json
+import zipfile
+
 from ulanzi_niri.config import ButtonEntry, LabelConfig
 from ulanzi_niri.zip_builder import _zip_is_safe, build_buttons_zip
 
@@ -21,3 +25,17 @@ def test_build_zip_produces_safe_blob() -> None:
     assert _zip_is_safe(blob)
     # Sanity: zip header magic
     assert blob[:2] == b"PK"
+
+
+def test_widget_icon_path_changes_with_content() -> None:
+    first = build_buttons_zip([], LabelConfig(), widget_images={0: b"first"})
+    second = build_buttons_zip([], LabelConfig(), widget_images={0: b"second"})
+
+    def icon_path(blob: bytes) -> str:
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            path = manifest["0_0"]["ViewParam"][0]["Icon"]
+            assert path in archive.namelist()
+            return path
+
+    assert icon_path(first) != icon_path(second)

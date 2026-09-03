@@ -9,7 +9,14 @@ import json
 from PIL import Image
 
 from ulanzi_niri import aistat
-from ulanzi_niri.aistat import _default_label, format_reset, render_widget, resolve_limit
+from ulanzi_niri.aistat import (
+    FetchStatus,
+    UsageFetcher,
+    _default_label,
+    format_reset,
+    render_widget,
+    resolve_limit,
+)
 from ulanzi_niri.config import AistatWidget
 
 PROVIDERS = {
@@ -134,6 +141,9 @@ class _FakeProc:
     def kill(self) -> None:
         pass
 
+    async def wait(self) -> None:
+        pass
+
 
 async def test_fetch_usage_parses_json(monkeypatch) -> None:
     payload = json.dumps({"providers": PROVIDERS}).encode()
@@ -142,8 +152,9 @@ async def test_fetch_usage_parses_json(monkeypatch) -> None:
         return _FakeProc(payload)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    data = await aistat.fetch_usage()
-    assert data == {"providers": PROVIDERS}
+    result = await aistat.fetch_usage()
+    assert result.status is FetchStatus.OK
+    assert result.data == {"providers": PROVIDERS}
 
 
 async def test_fetch_usage_missing_binary(monkeypatch) -> None:
@@ -151,7 +162,9 @@ async def test_fetch_usage_missing_binary(monkeypatch) -> None:
         raise FileNotFoundError
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    assert await aistat.fetch_usage() is None
+    result = await aistat.fetch_usage()
+    assert result.status is FetchStatus.ERROR
+    assert result.data is None
 
 
 async def test_fetch_usage_bad_json(monkeypatch) -> None:
@@ -159,4 +172,56 @@ async def test_fetch_usage_bad_json(monkeypatch) -> None:
         return _FakeProc(b"not json", returncode=0)
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    assert await aistat.fetch_usage() is None
+    result = await aistat.fetch_usage()
+    assert result.status is FetchStatus.ERROR
+    assert result.data is None
+
+
+async def test_fetch_usage_timeout(monkeypatch) -> None:
+    async def fake_exec(*_args, **_kwargs) -> _FakeProc:
+        return _FakeProc(b"", returncode=0)
+
+    async def fake_wait_for(coro, timeout=None):
+        await coro
+        raise TimeoutError
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    monkeypatch.setattr(asyncio, "wait_for", fake_wait_for)
+    result = await aistat.fetch_usage(timeout=0.1)
+    assert result.status is FetchStatus.TIMEOUT
+    assert result.data is None
+
+
+async def test_usage_fetcher_refreshes_in_background(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_fetch(timeout: float = 20.0) -> aistat.UsageFetchResult:
+        nonlocal calls
+        calls += 1
+        return aistat.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(aistat, "fetch_usage", fake_fetch)
+
+    updates = 0
+
+    async def on_update() -> None:
+        nonlocal updates
+        updates += 1
+
+    fetcher = UsageFetcher()
+    fetcher.set_on_update(on_update)
+    assert fetcher.get() is None
+
+    fetcher.refresh()
+    assert fetcher._task is not None
+    await fetcher._task
+    assert fetcher.get() is not None
+    assert updates == 1
+
+    fetcher.refresh()
+    assert calls == 1
+
+    fetcher.refresh(force=True)
+    assert fetcher._task is not None
+    await fetcher._task
+    assert calls == 2

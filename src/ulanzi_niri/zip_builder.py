@@ -8,6 +8,7 @@ with random bytes until the resulting ZIP avoids the bad offsets.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -101,8 +102,10 @@ def build_buttons_zip(
         button = by_pos.get(pos)
         view: dict = {}
         if pos in widget_images:
-            arc_name = f"widget-{pos}.png"
-            (icons_dir / arc_name).write_bytes(widget_images[pos])
+            image = widget_images[pos]
+            digest = hashlib.sha256(image).hexdigest()[:12]
+            arc_name = f"widget-{pos}-{digest}.png"
+            (icons_dir / arc_name).write_bytes(image)
             view["Icon"] = f"icons/{arc_name}"
         elif button is not None and (button.icon or button.label):
             # Note: we do not emit "Text" here. Our PIL renderer bakes the

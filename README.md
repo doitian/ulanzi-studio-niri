@@ -12,6 +12,7 @@ Buttons can:
 - Send keystrokes (`wtype` / `ydotool`)
 - Switch between configured pages
 - Adjust deck brightness
+- Refresh usage widgets on demand
 
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
@@ -31,7 +32,17 @@ label = "Claude 5h"
 
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
 widget shows the remaining percentage and reset time. All widgets share
-a single `aistat` invocation, refreshed every 30 minutes.
+a single `aistat` invocation, refreshed in the background (never blocking
+the event loop) and updated automatically when the fetch completes. Add a
+`{ type = "refresh" }` button to force a manual refresh:
+
+```toml
+[[page.button]]
+pos = 12
+label = "Refresh"
+icon = "view-refresh"
+on_press = { type = "refresh" }
+```
 
 ## Hardware
 

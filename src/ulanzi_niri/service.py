@@ -10,7 +10,7 @@ from pathlib import Path
 from watchfiles import awatch
 
 from .actions import ActionContext, dispatch
-from .aistat import fetch_usage, render_widget
+from .aistat import UsageFetcher, render_widget
 from .config import (
     Config,
     PageConfig,
@@ -50,6 +50,8 @@ class Service:
         self._encoder_accum: dict[int, int] = {}
         self._encoder_flush_task: dict[int, asyncio.Task] = {}
         self._brightness: int = self._cfg.device.brightness
+        self._usage = UsageFetcher()
+        self._usage.set_on_update(self._on_usage_update)
 
     # ------------------------------------------------------------------ public lifecycle
     async def run(self) -> None:
@@ -156,9 +158,19 @@ class Service:
     async def _render_widget_images(self, page: PageConfig) -> dict[int, bytes]:
         if not page.widget:
             return {}
-        data = await fetch_usage()
-        providers = (data or {}).get("providers", {})
-        return {w.pos: render_widget(w, providers) for w in page.widget}
+        result = self._usage.get()
+        self._usage.refresh()
+        if result is None:
+            return {w.pos: render_widget(w, {}) for w in page.widget}
+        providers = (result.data or {}).get("providers", {})
+        return {
+            w.pos: render_widget(w, providers, status=result.status)
+            for w in page.widget
+        }
+
+    async def _on_usage_update(self) -> None:
+        if self._device is not None and self._pages.current.widget:
+            await self._render_current_page()
 
     def _start_wide_tile_worker(self) -> None:
         assert self._device is not None
@@ -301,6 +313,11 @@ class Service:
         target = self._cfg.cycle_target(self._pages.name, step)
         if target is not None:
             await self.switch_page(target)
+
+    async def refresh_usage(self) -> None:
+        self._usage.refresh(force=True)
+        if self._device is not None:
+            await self._render_current_page()
 
     async def set_brightness(self, value: int) -> None:
         self._brightness = max(0, min(100, int(value)))

@@ -26,6 +26,7 @@ from ..config import (
     NiriAction,
     NoopAction,
     PageAction,
+    RefreshAction,
     ScreenshotAction,
     SmallWindowAction,
     UrlAction,
@@ -124,6 +125,8 @@ async def dispatch(action: Action | None, ctx: ActionContext) -> None:
             await _do_brightness(action, ctx)
         elif isinstance(action, SmallWindowAction):
             await ctx.service.set_wide_tile_mode(action.mode)
+        elif isinstance(action, RefreshAction):
+            await ctx.service.refresh_usage()
         else:
             log.warning("unhandled action: %r", action)
     except Exception:  # noqa: BLE001
