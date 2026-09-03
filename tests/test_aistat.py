@@ -15,7 +15,10 @@ from ulanzi_niri.aistat import (
     _default_label,
     format_reset,
     render_widget,
+    resolve_auth_error,
+    resolve_http_status,
     resolve_limit,
+    result_auth_denied,
 )
 from ulanzi_niri.config import AistatWidget
 
@@ -101,6 +104,113 @@ def test_resolve_limit_missing() -> None:
     assert resolve_limit(PROVIDERS, "codex", "nobody@x.com", "five_hour") is None
     assert resolve_limit(PROVIDERS, "claude", "ian@example.com", "thirty_day") is None
     assert resolve_limit({}, "claude", "", "five_hour") is None
+
+
+def test_resolve_auth_error_account() -> None:
+    providers = {
+        "claude": {
+            "accounts": [
+                {
+                    "email": "ian@example.com",
+                    "active": True,
+                    "limits": None,
+                    "error": "auth denied: HTTP 401 from https://api.anthropic.com: ...",
+                }
+            ]
+        }
+    }
+    assert resolve_auth_error(providers, "claude", "") is not None
+
+
+def test_resolve_auth_error_provider_level() -> None:
+    providers = {
+        "claude": {
+            "error": "auth missing: claude token not found — run `claude /login` to authenticate"
+        }
+    }
+    assert resolve_auth_error(providers, "claude", "") is not None
+
+
+def test_resolve_auth_error_none() -> None:
+    assert resolve_auth_error(PROVIDERS, "claude", "") is None
+    assert resolve_auth_error({}, "claude", "") is None
+
+
+def test_result_auth_denied() -> None:
+    assert result_auth_denied(None) is False
+    assert result_auth_denied({"providers": PROVIDERS}) is False
+    assert (
+        result_auth_denied(
+            {"providers": {"claude": {"accounts": [{"error": "auth denied: HTTP 401"}]}}}
+        )
+        is True
+    )
+    assert result_auth_denied({"providers": {"claude": {"error": "auth missing"}}}) is True
+
+
+def test_render_widget_auth_error() -> None:
+    providers = {
+        "claude": {
+            "accounts": [
+                {
+                    "email": "ian@example.com",
+                    "active": True,
+                    "limits": None,
+                    "error": "auth denied: HTTP 401 from https://api.anthropic.com",
+                }
+            ]
+        }
+    }
+    widget = AistatWidget(pos=1, provider="claude", account="", limit="five_hour")
+    png = render_widget(widget, providers)
+    assert Image.open(io.BytesIO(png)).size == (196, 196)
+
+
+def test_resolve_http_status() -> None:
+    providers = {
+        "claude": {
+            "accounts": [
+                {
+                    "email": "ian@example.com",
+                    "active": True,
+                    "limits": None,
+                    "error": "auth denied: HTTP 403 from https://api.anthropic.com: forbidden",
+                }
+            ]
+        },
+        "codex": {
+            "accounts": [
+                {
+                    "email": "me@pomail.net",
+                    "active": True,
+                    "limits": None,
+                    "error": "transient failure: HTTP 429 from https://api.openai.com: slow down",
+                }
+            ]
+        },
+    }
+    assert resolve_http_status(providers, "claude", "") == 403
+    assert resolve_http_status(providers, "codex", "") == 429
+
+
+def test_resolve_http_status_provider_level() -> None:
+    providers = {"claude": {"error": "transient failure: HTTP 500 from https://api.anthropic.com"}}
+    assert resolve_http_status(providers, "claude", "") == 500
+
+
+def test_resolve_http_status_none() -> None:
+    assert resolve_http_status(PROVIDERS, "claude", "") is None
+    assert resolve_http_status({}, "claude", "") is None
+    assert resolve_http_status({"claude": {"error": "auth missing: claude token not found"}}, "claude", "") is None
+
+
+def test_resolve_http_status_isolated_per_provider() -> None:
+    providers = {
+        "claude": {"accounts": [{"email": "ian@example.com", "active": True, "error": "auth denied: HTTP 401"}]},
+        "codex": PROVIDERS["codex"],
+    }
+    assert resolve_http_status(providers, "claude", "") == 401
+    assert resolve_http_status(providers, "codex", "") is None
 
 
 def test_format_reset() -> None:
@@ -261,3 +371,51 @@ async def test_usage_fetcher_refreshes_in_background(monkeypatch) -> None:
     assert fetcher._task is not None
     await fetcher._task
     assert calls == 2
+
+
+async def test_usage_fetcher_retries_after_failure(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_fetch(timeout: float = 20.0) -> aistat.UsageFetchResult:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return aistat.UsageFetchResult(FetchStatus.ERROR)
+        return aistat.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(aistat, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(aistat, "RETRY_BACKOFF_SECONDS", (0,))
+
+    fetcher = UsageFetcher()
+    fetcher.refresh()
+    await fetcher._task
+    assert fetcher.get().status is FetchStatus.ERROR
+    assert fetcher._retry_task is not None
+
+    retry_task = fetcher._retry_task
+    await retry_task
+    assert fetcher.get().status is FetchStatus.OK
+    assert calls == 2
+
+
+async def test_usage_fetcher_does_not_retry_auth_error(monkeypatch) -> None:
+    async def fake_fetch(timeout: float = 20.0) -> aistat.UsageFetchResult:
+        return aistat.UsageFetchResult(
+            FetchStatus.ERROR,
+            {
+                "providers": {
+                    "claude": {
+                        "error": "auth missing: claude token not found — run `claude /login` to authenticate"
+                    }
+                }
+            },
+        )
+
+    monkeypatch.setattr(aistat, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(aistat, "RETRY_BACKOFF_SECONDS", (0,))
+
+    fetcher = UsageFetcher()
+    fetcher.refresh()
+    await fetcher._task
+    assert fetcher.get().status is FetchStatus.ERROR
+    assert fetcher._retry_task is None

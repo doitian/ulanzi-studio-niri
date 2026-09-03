@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from enum import Enum
@@ -25,6 +26,8 @@ from .protocol.ulanzi_d200x import STD_ICON
 log = logging.getLogger(__name__)
 
 AISTAT_REFRESH_SECONDS = 30 * 60
+
+RETRY_BACKOFF_SECONDS = (30, 60, 120, 300, 600)
 
 WIDGET_SIZE = STD_ICON  # (196, 196)
 
@@ -58,6 +61,12 @@ class UsageFetcher:
     ``refresh()`` starts a background fetch only when the cache is older than
     ``ttl`` and no fetch is already in flight. A finished fetch invokes
     ``on_update`` so callers can repaint with fresh data.
+
+    Failed fetches are retried with a capped exponential backoff
+    (``RETRY_BACKOFF_SECONDS``) instead of waiting for the next external
+    refresh, so a transient failure recovers on its own. Auth failures (e.g. an
+    expired Claude token needing ``claude /login``) are cached as-is and never
+    retried — the renderer surfaces them as ``401``.
     """
 
     def __init__(self, *, ttl: float = AISTAT_TTL_SECONDS) -> None:
@@ -65,6 +74,8 @@ class UsageFetcher:
         self._result: UsageFetchResult | None = None
         self._fetched_at: float | None = None
         self._task: asyncio.Task | None = None
+        self._retry_task: asyncio.Task | None = None
+        self._retry_attempt = 0
         self._on_update: Callable[[], Awaitable[None]] | None = None
 
     def set_on_update(self, callback: Callable[[], Awaitable[None]]) -> None:
@@ -83,9 +94,31 @@ class UsageFetcher:
         self._task = asyncio.create_task(self._run())
 
     async def _run(self) -> None:
-        self._result = await fetch_usage()
+        result = await fetch_usage()
+        self._result = result
         self._fetched_at = asyncio.get_running_loop().time()
-        log.debug("usage fetch complete: status=%s", self._result.status)
+        log.debug("usage fetch complete: status=%s", result.status)
+        await self._notify()
+        if result.status is FetchStatus.OK or result_auth_denied(result.data):
+            self._retry_attempt = 0
+        else:
+            self._schedule_retry()
+
+    def _schedule_retry(self) -> None:
+        if self._retry_task is not None and not self._retry_task.done():
+            return
+        idx = min(self._retry_attempt, len(RETRY_BACKOFF_SECONDS) - 1)
+        delay = RETRY_BACKOFF_SECONDS[idx]
+        self._retry_attempt += 1
+        log.info("usage fetch failed; retrying in %.0fs", delay)
+        self._retry_task = asyncio.create_task(self._retry_later(delay))
+
+    async def _retry_later(self, delay: float) -> None:
+        await asyncio.sleep(delay)
+        self._retry_task = None
+        await self._run()
+
+    async def _notify(self) -> None:
         callback = self._on_update
         if callback is not None:
             try:
@@ -100,39 +133,58 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
     ``--refresh`` is deliberately omitted so the CLI observes its local 90s
     TTL instead of hitting the API every time (which risks rate-limit errors).
 
-    The CLI prints JSON on stdout by default (``--human`` opts into text).
+    The CLI prints JSON on stdout by default (``--human`` opts into text). The
+    JSON is preserved even on a non-zero exit so the renderer can surface
+    per-provider errors such as an expired token.
     """
     argv = ["aistat", "usage"]
     try:
         proc = await asyncio.create_subprocess_exec(
             *argv,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.PIPE,
         )
     except FileNotFoundError:
         log.error("aistat binary not found on PATH; install it to show usage widgets")
         return UsageFetchResult(FetchStatus.ERROR)
     try:
-        out, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
     except TimeoutError:
         proc.kill()
         await proc.wait()
         log.error("aistat timed out after %.0fs", timeout)
         return UsageFetchResult(FetchStatus.TIMEOUT)
+
+    detail = err.decode("utf-8", "replace").strip()
     if proc.returncode != 0:
-        log.warning("aistat exited %d", proc.returncode)
-        return UsageFetchResult(FetchStatus.ERROR)
+        log.warning("aistat exited %d%s", proc.returncode, f": {detail}" if detail else "")
     try:
-        return UsageFetchResult(FetchStatus.OK, json.loads(out.decode("utf-8")))
+        payload = json.loads(out.decode("utf-8"))
     except (json.JSONDecodeError, UnicodeDecodeError):
         log.warning("aistat returned non-JSON output")
         return UsageFetchResult(FetchStatus.ERROR)
+    status = FetchStatus.OK if proc.returncode == 0 else FetchStatus.ERROR
+    return UsageFetchResult(status, payload)
 
 
-def resolve_limit(
-    providers: dict, provider: str, account: str, limit: str
-) -> AistatLimit | None:
-    """Pick a limit out of aistat's ``providers`` object.
+_AUTH_ERROR_MARKERS = (
+    "auth denied",
+    "auth missing",
+    "credential expired",
+    "token not found",
+    "tokens revoked",
+    "token_invalidated",
+    "token_revoked",
+)
+
+
+def _is_auth_error(message: str) -> bool:
+    lowered = message.lower()
+    return any(marker in lowered for marker in _AUTH_ERROR_MARKERS)
+
+
+def resolve_account(providers: dict, provider: str, account: str) -> dict | None:
+    """Resolve a provider's account dict from aistat's ``providers`` object.
 
     ``account`` matches an entry's email; when empty the provider's ``active``
     account is used (falling back to the first entry).
@@ -143,19 +195,24 @@ def resolve_limit(
     accounts = p.get("accounts")
     if not isinstance(accounts, list):
         return None
-    target: dict | None = None
     if account:
         for a in accounts:
             if isinstance(a, dict) and a.get("email") == account:
-                target = a
-                break
-    else:
-        for a in accounts:
-            if isinstance(a, dict) and a.get("active"):
-                target = a
-                break
-        if target is None and accounts and isinstance(accounts[0], dict):
-            target = accounts[0]
+                return a
+        return None
+    for a in accounts:
+        if isinstance(a, dict) and a.get("active"):
+            return a
+    if accounts and isinstance(accounts[0], dict):
+        return accounts[0]
+    return None
+
+
+def resolve_limit(
+    providers: dict, provider: str, account: str, limit: str
+) -> AistatLimit | None:
+    """Pick a limit out of aistat's ``providers`` object for a provider/account."""
+    target = resolve_account(providers, provider, account)
     if target is None:
         return None
     limits = target.get("limits")
@@ -169,6 +226,75 @@ def resolve_limit(
         resets_at=str(lim.get("resets_at", "")),
         reset_after_seconds=float(lim.get("reset_after_seconds", 0.0)),
     )
+
+
+def resolve_auth_error(providers: dict, provider: str, account: str) -> str | None:
+    """Return the auth error message for a provider/account, else ``None``.
+
+    Checks the provider-level ``error`` first (e.g. ``auth missing``), then the
+    resolved account's ``error`` (e.g. an expired token needing re-login).
+    """
+    p = providers.get(provider)
+    if isinstance(p, dict):
+        err = p.get("error")
+        if isinstance(err, str) and err and _is_auth_error(err):
+            return err
+    target = resolve_account(providers, provider, account)
+    if target is not None:
+        err = target.get("error")
+        if isinstance(err, str) and err and _is_auth_error(err):
+            return err
+    return None
+
+
+_HTTP_STATUS_RE = re.compile(r"HTTP (\d{3})")
+
+
+def resolve_http_status(providers: dict, provider: str, account: str) -> int | None:
+    """Return the HTTP status code from a provider/account error, else ``None``.
+
+    aistat embeds failed status codes in its error text (e.g. ``"HTTP 401"``,
+    ``"HTTP 429"``); this surfaces the code for a single widget's provider and
+    account so one failing provider does not affect the others.
+    """
+    p = providers.get(provider)
+    if isinstance(p, dict):
+        err = p.get("error")
+        if isinstance(err, str):
+            m = _HTTP_STATUS_RE.search(err)
+            if m is not None:
+                return int(m.group(1))
+    target = resolve_account(providers, provider, account)
+    if target is not None:
+        err = target.get("error")
+        if isinstance(err, str):
+            m = _HTTP_STATUS_RE.search(err)
+            if m is not None:
+                return int(m.group(1))
+    return None
+
+
+def result_auth_denied(data: dict | None) -> bool:
+    """True when any provider/account in an aistat result reports an auth error."""
+    if not isinstance(data, dict):
+        return False
+    providers = data.get("providers")
+    if not isinstance(providers, dict):
+        return False
+    for p in providers.values():
+        if not isinstance(p, dict):
+            continue
+        err = p.get("error")
+        if isinstance(err, str) and err and _is_auth_error(err):
+            return True
+        accounts = p.get("accounts")
+        if isinstance(accounts, list):
+            for a in accounts:
+                if isinstance(a, dict):
+                    err = a.get("error")
+                    if isinstance(err, str) and err and _is_auth_error(err):
+                        return True
+    return False
 
 
 def format_reset(seconds: float) -> str:
@@ -264,6 +390,12 @@ def _load_background_icon(name: str, size: int) -> Image.Image | None:
     return dim
 
 
+_COLOR_GRAY = (160, 160, 160)
+_COLOR_GREEN = (0, 200, 80)
+_COLOR_YELLOW = (240, 190, 0)
+_COLOR_RED = (230, 60, 50)
+
+
 def render_widget(
     widget: AistatWidget,
     providers: dict,
@@ -281,6 +413,8 @@ def render_widget(
     draw = ImageDraw.Draw(img)
 
     info = resolve_limit(providers, widget.provider, widget.account, widget.limit)
+    http_status = resolve_http_status(providers, widget.provider, widget.account)
+    auth_error = resolve_auth_error(providers, widget.provider, widget.account)
     label = widget.label or _default_label(widget)
     cx = size // 2
     max_width = size - 2 * padding
@@ -289,13 +423,29 @@ def render_widget(
 
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
+        color = _COLOR_RED
+    elif http_status is not None:
+        pct = str(http_status)
+        color = _COLOR_RED
+    elif auth_error is not None:
+        pct = "401"
+        color = _COLOR_RED
     elif status is FetchStatus.ERROR:
         pct = "Err"
+        color = _COLOR_RED
     elif info is None:
         pct = "n/a"
+        color = _COLOR_GRAY
+    elif info.remaining_percent >= 60:
+        pct = f"{info.remaining_percent:.0f}%"
+        color = _COLOR_GREEN
+    elif info.remaining_percent >= 30:
+        pct = f"{info.remaining_percent:.0f}%"
+        color = _COLOR_YELLOW
     else:
         pct = f"{info.remaining_percent:.0f}%"
-    _draw_fit(draw, (cx, size // 2), pct, 48, (255, 255, 255), max_width)
+        color = _COLOR_RED
+    _draw_fit(draw, (cx, size // 2), pct, 48, color, max_width)
 
     if info is not None:
         reset = f"resets {format_reset(info.reset_after_seconds)}"
