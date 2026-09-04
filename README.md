@@ -17,25 +17,46 @@ Buttons can:
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
 
-LCD buttons can show remaining Claude/Codex plan usage via the `aistat` CLI
-(`github.com/drogers0/aistat`). Configure one `[[page.widget]]` per
-provider/window; each renders on the button at its `pos`:
+LCD buttons can show remaining Claude, Codex, and OpenCode Go plan usage. The
+daemon reads credentials maintained by `claude /login`, `codex login`, and
+OpenCode `/connect`, then fetches usage directly from each provider. Configure
+one `[[page.widget]]` per provider/window; each renders on the button at its
+`pos`:
 
 ```toml
 [[page.widget]]
 pos = 1
 provider = "claude"
-account = "you@example.com"  # empty = active account
+account = ""                 # direct integration uses the active CLI account
 limit = "five_hour"          # five_hour | seven_day | seven_day_fable (Claude)
 label = "5H"
 icon = "claude-desktop"
 ```
 
+OpenCode Go provides `rolling`, `weekly`, and `monthly` windows:
+
+```toml
+[[page.widget]]
+pos = 2
+provider = "opencode-go"
+limit = "rolling"           # rolling | weekly | monthly
+label = "GO 5H"
+```
+
+Its API key is read from the `opencode-go` entry in
+`$XDG_DATA_HOME/opencode/auth.json` (normally
+`~/.local/share/opencode/auth.json`). Set `OPENCODE_GO_API_KEY` to override it.
+
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
-widget shows the remaining percentage and reset time. All widgets share
-a single `aistat` invocation, refreshed in the background (never blocking
-the event loop) and updated automatically when the fetch completes. Add a
-`{ type = "refresh" }` button to force a manual refresh:
+widget shows the remaining percentage and reset time. Provider data is fetched
+concurrently in the background (never blocking the event loop) and updated
+automatically when the fetch completes. Results are cached for 30 minutes to
+limit provider API traffic. Claude and Codex access tokens near expiry are
+refreshed using the CLI's refresh token and the rotated credentials are written
+back atomically.
+HTTP 429 responses are not retried automatically. Add a
+`{ type = "refresh" }` button to request a manual refresh. Manual refreshes
+are throttled to one fetch every 90 seconds:
 
 ```toml
 [[page.button]]
@@ -43,6 +64,12 @@ pos = 12
 label = "Refresh"
 icon = "view-refresh"
 on_press = { type = "refresh" }
+```
+
+The same data is available in a terminal:
+
+```sh
+ulanzi-niri ai-usage
 ```
 
 ## Hardware

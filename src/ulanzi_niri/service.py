@@ -10,7 +10,7 @@ from pathlib import Path
 from watchfiles import awatch
 
 from .actions import ActionContext, dispatch
-from .aistat import UsageFetcher, render_widget
+from .ai_usage import UsageFetcher, render_widget
 from .config import (
     Config,
     PageConfig,

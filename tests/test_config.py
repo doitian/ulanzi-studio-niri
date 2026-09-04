@@ -228,6 +228,42 @@ def test_widget_fable_limit_restricted_to_claude() -> None:
         )
 
 
+def test_widget_opencode_go_limits() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "opencode-go"
+        limit = "rolling"
+        [[page.widget]]
+        pos = 2
+        provider = "opencode-go"
+        limit = "weekly"
+        [[page.widget]]
+        pos = 3
+        provider = "opencode-go"
+        limit = "monthly"
+        """
+    )
+    assert [widget.limit for widget in cfg.page[0].widget] == ["rolling", "weekly", "monthly"]
+
+
+def test_widget_opencode_go_rejects_other_provider_limits() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "opencode-go"
+            limit = "five_hour"
+            """
+        )
+
+
 def test_widget_bad_pos_rejected() -> None:
     with pytest.raises(ValidationError):
         _load(

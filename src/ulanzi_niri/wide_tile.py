@@ -21,8 +21,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
 
-from .aistat import AISTAT_REFRESH_SECONDS
-from .config import AistatWidget, WideTileEntry
+from .ai_usage import USAGE_REFRESH_SECONDS
+from .config import UsageWidget, WideTileEntry
 from .protocol.ulanzi_d200x import SmallWindowMode, UlanziD200XDevice
 from .stats import StatsSnapshot, prime_cpu_sampler
 
@@ -40,7 +40,7 @@ _CLOCK_MODES: dict[str, SmallWindowMode] = {
 @dataclass
 class WideTileState:
     config: WideTileEntry
-    widgets: list[AistatWidget] = field(default_factory=list)
+    widgets: list[UsageWidget] = field(default_factory=list)
 
 
 def build_clock_payload(mode: SmallWindowMode, time_format: str = "%H:%M:%S") -> str:
@@ -112,7 +112,7 @@ class WideTileWorker:
                 log.exception("wide-tile tick failed")
             if self._refresh is not None and self._state.widgets:
                 now = loop.time()
-                if now - last_widget_refresh >= AISTAT_REFRESH_SECONDS:
+                if now - last_widget_refresh >= USAGE_REFRESH_SECONDS:
                     last_widget_refresh = now
                     try:
                         await self._refresh()

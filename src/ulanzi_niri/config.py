@@ -64,8 +64,15 @@ class UrlAction(_ActionBase):
 class MediaAction(_ActionBase):
     type: Literal["media"]
     cmd: Literal[
-        "play-pause", "play", "pause", "next", "prev", "stop",
-        "vol-up", "vol-down", "mute",
+        "play-pause",
+        "play",
+        "pause",
+        "next",
+        "prev",
+        "stop",
+        "vol-up",
+        "vol-down",
+        "mute",
     ]
     player: str | None = None
     step: int = 5  # percent step for volume
@@ -119,7 +126,17 @@ class RefreshAction(_ActionBase):
 
 
 Action = Annotated[
-    NoopAction | NiriAction | ExecAction | UrlAction | MediaAction | ScreenshotAction | KeysAction | PageAction | BrightnessAction | SmallWindowAction | RefreshAction,
+    NoopAction
+    | NiriAction
+    | ExecAction
+    | UrlAction
+    | MediaAction
+    | ScreenshotAction
+    | KeysAction
+    | PageAction
+    | BrightnessAction
+    | SmallWindowAction
+    | RefreshAction,
     Field(discriminator="type"),
 ]
 
@@ -167,20 +184,27 @@ class EncoderEntry(BaseModel):
         return v
 
 
-class AistatWidget(BaseModel):
+class UsageWidget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pos: int
-    provider: Literal["claude", "codex"]
+    provider: Literal["claude", "codex", "opencode-go"]
     account: str = ""  # empty = the provider's active account
-    limit: Literal["five_hour", "seven_day", "seven_day_fable"]
+    limit: Literal["five_hour", "seven_day", "seven_day_fable", "rolling", "weekly", "monthly"]
     label: str = ""
     icon: str | None = None
 
     @model_validator(mode="after")
-    def _validate_limit(self) -> AistatWidget:
-        if self.limit == "seven_day_fable" and self.provider != "claude":
-            raise ValueError("seven_day_fable limit is only available for the claude provider")
+    def _validate_limit(self) -> UsageWidget:
+        allowed = {
+            "claude": {"five_hour", "seven_day", "seven_day_fable"},
+            "codex": {"five_hour", "seven_day"},
+            "opencode-go": {"rolling", "weekly", "monthly"},
+        }
+        if self.limit not in allowed[self.provider]:
+            raise ValueError(
+                f"{self.limit} limit is not available for the {self.provider} provider"
+            )
         return self
 
     @field_validator("pos")
@@ -218,7 +242,7 @@ class PageConfig(BaseModel):
     default: bool = False
     button: list[ButtonEntry] = Field(default_factory=list)
     encoder: list[EncoderEntry] = Field(default_factory=list)
-    widget: list[AistatWidget] = Field(default_factory=list)
+    widget: list[UsageWidget] = Field(default_factory=list)
     wide_tile: WideTileEntry | None = None
 
     @field_validator("wide_tile", mode="before")

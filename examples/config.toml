@@ -180,9 +180,9 @@ mode = "time-weekday"
 # ...
 
 # ----------------------------------------------------------------------- usage page
-# A page that shows remaining Claude/Codex plan usage on LCD buttons.
-# Requires the `aistat` CLI (github.com/drogers0/aistat). Data is refreshed
-# every 30 minutes via a single `aistat` invocation shared by all widgets.
+# A page that shows remaining Claude/Codex/OpenCode Go usage on LCD buttons.
+# Uses credentials maintained by `claude /login`, `codex login`, and OpenCode
+# `/connect`. Provider data is fetched directly and refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
 # [[page]]
@@ -192,7 +192,7 @@ mode = "time-weekday"
 # [[page.widget]]
 # pos = 0
 # provider = "claude"
-# account = "you@example.com"
+# account = ""
 # limit = "seven_day_fable"
 # label = "FABLE"
 # icon = "claude-desktop"
@@ -200,7 +200,7 @@ mode = "time-weekday"
 # [[page.widget]]
 # pos = 1
 # provider = "claude"
-# account = "you@example.com"
+# account = ""
 # limit = "five_hour"
 # label = "5H"
 # icon = "claude-desktop"
@@ -208,7 +208,7 @@ mode = "time-weekday"
 # [[page.widget]]
 # pos = 2
 # provider = "claude"
-# account = "you@example.com"
+# account = ""
 # limit = "seven_day"
 # label = "7D"
 # icon = "claude-desktop"
@@ -216,7 +216,7 @@ mode = "time-weekday"
 # [[page.widget]]
 # pos = 3
 # provider = "codex"
-# account = "you@example.com"
+# account = ""
 # limit = "five_hour"
 # label = "5H"
 # icon = "chatgpt"
@@ -224,10 +224,34 @@ mode = "time-weekday"
 # [[page.widget]]
 # pos = 4
 # provider = "codex"
-# account = "you@example.com"
+# account = ""
 # limit = "seven_day"
 # label = "7D"
 # icon = "chatgpt"
+#
+# [[page.widget]]
+# pos = 5
+# provider = "opencode-go"
+# account = ""
+# limit = "rolling"
+# label = "5H"
+# icon = "opencode"
+#
+# [[page.widget]]
+# pos = 6
+# provider = "opencode-go"
+# account = ""
+# limit = "weekly"
+# label = "7D"
+# icon = "opencode"
+#
+# [[page.widget]]
+# pos = 7
+# provider = "opencode-go"
+# account = ""
+# limit = "monthly"
+# label = "1M"
+# icon = "opencode"
 #
 # [[page.button]]
 # pos = 14

@@ -35,6 +35,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor", help="report environment + device status")
     _add_common(p_doctor)
 
+    p_usage = sub.add_parser("ai-usage", help="show remaining AI plan usage")
+    p_usage.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
+    p_usage.add_argument("--timeout", type=float, default=20.0, help="request timeout in seconds")
+
     p_render = sub.add_parser("render", help="render the current page to PNG files (no device)")
     _add_common(p_render)
     p_render.add_argument("--out", type=Path, default=Path("/tmp/ulanzi-render"))
@@ -66,6 +70,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_run(args)
     if cmd == "doctor":
         return _cmd_doctor(args)
+    if cmd == "ai-usage":
+        return _cmd_usage(args)
     if cmd == "render":
         return _cmd_render(args)
     if cmd == "push":
@@ -115,11 +121,110 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         else:
             print("device open:   ok")
             dev.close()
-    for tool in ("niri", "playerctl", "wpctl", "grim", "grimblast", "wtype", "ydotool", "slurp", "aistat"):
+    for tool in ("niri", "playerctl", "wpctl", "grim", "grimblast", "wtype", "ydotool", "slurp"):
         from shutil import which
+
         present = which(tool)
         print(f"  {tool:10}{'present at ' + present if present else 'not found'}")
     return 0
+
+
+def _human_limit_name(name: str) -> str:
+    return {
+        "five_hour": "5-hour",
+        "seven_day": "7-day",
+        "seven_day_fable": "7-day Fable",
+        "seven_day_sonnet": "7-day Sonnet",
+        "thirty_day": "30-day",
+        "rolling": "5-hour rolling",
+        "weekly": "Weekly",
+        "monthly": "Monthly",
+    }.get(name, name.replace("_", " "))
+
+
+def _human_percent(value: object) -> str:
+    try:
+        return f"{float(str(value)):.2f}".rstrip("0").rstrip(".")
+    except (TypeError, ValueError):
+        return "?"
+
+
+def _format_usage_report(data: dict | None) -> tuple[str, bool]:
+    """Return display text and whether at least one provider succeeded."""
+    from .ai_usage import format_reset
+
+    providers = data.get("providers") if isinstance(data, dict) else None
+    if not isinstance(providers, dict):
+        return "No usage data available.", False
+
+    provider_names = [name for name in ("claude", "codex", "opencode-go") if name in providers]
+    provider_names.extend(sorted(name for name in providers if name not in provider_names))
+    sections: list[str] = []
+    any_success = False
+    limit_order = {
+        "five_hour": 0,
+        "rolling": 0,
+        "seven_day": 1,
+        "weekly": 1,
+        "seven_day_fable": 2,
+        "monthly": 3,
+    }
+
+    for provider_name in provider_names:
+        provider = providers[provider_name]
+        title = "OpenCode Go" if provider_name == "opencode-go" else provider_name.capitalize()
+        if not isinstance(provider, dict):
+            sections.append(f"{title}: unavailable (invalid response)")
+            continue
+        accounts = provider.get("accounts")
+        if not isinstance(accounts, list) or not accounts:
+            error = provider.get("error")
+            sections.append(f"{title}: unavailable ({error or 'no account data'})")
+            continue
+
+        any_success = True
+        lines = [title]
+        for account in accounts:
+            if not isinstance(account, dict):
+                continue
+            email = account.get("email")
+            if email:
+                lines.append(f"  Account: {email}")
+            error = account.get("error")
+            if error:
+                lines.append(f"  Unavailable: {error}")
+                continue
+            limits = account.get("limits")
+            if not isinstance(limits, dict) or not limits:
+                lines.append("  No usage windows reported")
+                continue
+            names = sorted(limits, key=lambda name: (limit_order.get(name, 99), name))
+            for name in names:
+                limit = limits[name]
+                if not isinstance(limit, dict):
+                    continue
+                remaining = _human_percent(limit.get("remaining_percent"))
+                reset = format_reset(float(limit.get("reset_after_seconds", 0)))
+                lines.append(
+                    f"  {_human_limit_name(name)}: {remaining}% remaining, resets in {reset}"
+                )
+        sections.append("\n".join(lines))
+
+    return "\n\n".join(sections), any_success
+
+
+def _cmd_usage(args: argparse.Namespace) -> int:
+    from .ai_usage import FetchStatus, fetch_usage
+
+    if args.timeout <= 0:
+        print("timeout must be greater than zero", file=sys.stderr)
+        return 2
+    result = asyncio.run(fetch_usage(timeout=args.timeout))
+    report, any_success = _format_usage_report(result.data)
+    print(report)
+    if result.status is FetchStatus.TIMEOUT:
+        return 1
+    return 0 if any_success else 1
 
 
 def _cmd_render(args: argparse.Namespace) -> int:
@@ -158,11 +263,13 @@ def _cmd_push(args: argparse.Namespace) -> int:
         print("device not available (check connection and udev rule)", file=sys.stderr)
         return 1
     try:
+
         async def _push() -> None:
             await dev.set_brightness(cfg.device.brightness, force=True)
             await dev.set_label_style(cfg.label.model_dump(), force=True)
             blob = build_buttons_zip(page.button, cfg.label)
             await dev.push_buttons_zip(blob)
+
         asyncio.run(_push())
     finally:
         dev.close()
