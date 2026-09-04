@@ -6,7 +6,7 @@ import base64
 import io
 import json
 
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from ulanzi_niri import ai_usage
 from ulanzi_niri.ai_usage import (
@@ -101,6 +101,20 @@ PROVIDERS = {
             }
         ]
     },
+    "moonshot": {
+        "accounts": [
+            {
+                "email": "",
+                "active": True,
+                "limits": {
+                    "balance": {
+                        "remaining_amount": 49.59,
+                        "currency": "CNY",
+                    },
+                },
+            }
+        ]
+    },
 }
 
 
@@ -147,6 +161,7 @@ def test_default_labels() -> None:
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="rolling")) == "5H"
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="weekly")) == "7D"
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="monthly")) == "30D"
+    assert _default_label(UsageWidget(pos=1, provider="moonshot", limit="balance")) == "BAL"
 
 
 def test_resolve_limit_missing() -> None:
@@ -352,6 +367,7 @@ async def test_fetch_usage_combines_providers(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_claude", lambda _timeout: PROVIDERS["claude"])
     monkeypatch.setattr(ai_usage, "_fetch_codex", lambda _timeout: PROVIDERS["codex"])
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
+    monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.OK
     assert result.data == {"providers": PROVIDERS}
@@ -366,6 +382,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_claude", lambda _timeout: PROVIDERS["claude"])
     monkeypatch.setattr(ai_usage, "_fetch_codex", lambda _timeout: error)
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
+    monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.ERROR
     assert result.data == {
@@ -373,6 +390,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
             "claude": PROVIDERS["claude"],
             "codex": error,
             "opencode-go": PROVIDERS["opencode-go"],
+            "moonshot": PROVIDERS["moonshot"],
         }
     }
 
@@ -420,6 +438,175 @@ def test_fetch_opencode_go(monkeypatch) -> None:
     assert limits["rolling"]["remaining_percent"] == 75
     assert limits["weekly"]["remaining_percent"] == 60
     assert limits["monthly"]["remaining_percent"] == 90
+
+
+def test_moonshot_credential_from_environment(monkeypatch) -> None:
+    monkeypatch.setenv("MOONSHOT_API_KEY", " test-key ")
+    monkeypatch.delenv("MOONSHOT_BASE_URL", raising=False)
+    key, url, currency = ai_usage._moonshot_credential()
+    assert key == "test-key"
+    assert url == ai_usage._MOONSHOT_BALANCE_URL_AI
+    assert currency == "USD"
+
+
+def test_moonshot_credential_base_url_override(monkeypatch) -> None:
+    monkeypatch.setenv("MOONSHOT_API_KEY", "test-key")
+    monkeypatch.setenv("MOONSHOT_BASE_URL", "https://api.moonshot.cn/v1/")
+    key, url, currency = ai_usage._moonshot_credential()
+    assert key == "test-key"
+    assert url == "https://api.moonshot.cn/v1/users/me/balance"
+    assert currency == "CNY"
+
+
+def test_moonshot_credential_from_auth_file(monkeypatch, tmp_path) -> None:
+    auth_dir = tmp_path / "opencode"
+    auth_dir.mkdir()
+    (auth_dir / "auth.json").write_text(
+        json.dumps(
+            {
+                "moonshotai": {"type": "api", "key": "intl-key"},
+                "moonshotai-cn": {"type": "api", "key": "cn-key"},
+            }
+        )
+    )
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+
+    key, url, currency = ai_usage._moonshot_credential()
+    assert key == "intl-key"
+    assert url == ai_usage._MOONSHOT_BALANCE_URL_AI
+    assert currency == "USD"
+
+
+def test_moonshot_credential_cn_fallback(monkeypatch, tmp_path) -> None:
+    auth_dir = tmp_path / "opencode"
+    auth_dir.mkdir()
+    (auth_dir / "auth.json").write_text(
+        json.dumps({"moonshotai-cn": {"type": "api", "key": "cn-key"}})
+    )
+    monkeypatch.delenv("MOONSHOT_API_KEY", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+
+    key, url, currency = ai_usage._moonshot_credential()
+    assert key == "cn-key"
+    assert url == ai_usage._MOONSHOT_BALANCE_URL_CN
+    assert currency == "CNY"
+
+
+def test_fetch_moonshot(monkeypatch) -> None:
+    monkeypatch.setattr(
+        ai_usage,
+        "_moonshot_credential",
+        lambda: ("test-key", ai_usage._MOONSHOT_BALANCE_URL_CN, "CNY"),
+    )
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json",
+        lambda *_args, **_kwargs: {
+            "code": 0,
+            "data": {
+                "available_balance": 97.32403,
+                "voucher_balance": 90.0,
+                "cash_balance": 7.32403,
+            },
+            "scode": "0x0",
+            "status": True,
+        },
+    )
+
+    provider = ai_usage._fetch_moonshot(5)
+    limits = provider["accounts"][0]["limits"]
+
+    assert limits["balance"] == {"remaining_amount": 97.32403, "currency": "CNY"}
+
+
+def test_fetch_moonshot_bad_response(monkeypatch) -> None:
+    monkeypatch.setattr(
+        ai_usage,
+        "_moonshot_credential",
+        lambda: ("test-key", ai_usage._MOONSHOT_BALANCE_URL_AI, "USD"),
+    )
+    monkeypatch.setattr(ai_usage, "_request_json", lambda *_args, **_kwargs: {"code": 10001})
+
+    provider = ai_usage._fetch_moonshot(5)
+
+    assert "error" in provider
+
+
+def test_format_balance() -> None:
+    assert ai_usage.format_balance(4.96, "USD") == "$4.96"
+    assert ai_usage.format_balance(97.32403, "CNY") == "¥97.32"
+    assert ai_usage.format_balance(1.5, "EUR") == "EUR 1.50"
+
+
+def test_balance_color_thresholds() -> None:
+    assert ai_usage._balance_color(70.0, "CNY") == ai_usage._COLOR_GREEN
+    assert ai_usage._balance_color(36.0, "CNY") == ai_usage._COLOR_YELLOW
+    assert ai_usage._balance_color(35.99, "CNY") == ai_usage._COLOR_RED
+    assert ai_usage._balance_color(12.0, "USD") == ai_usage._COLOR_GREEN
+    assert ai_usage._balance_color(6.0, "USD") == ai_usage._COLOR_YELLOW
+    assert ai_usage._balance_color(5.99, "USD") == ai_usage._COLOR_RED
+
+
+def test_resolve_limit_balance() -> None:
+    info = resolve_limit(PROVIDERS, "moonshot", "", "balance")
+    assert info is not None
+    assert info.remaining_amount == 49.59
+    assert info.currency == "CNY"
+    assert info.remaining_percent is None
+
+
+def test_render_widget_balance(monkeypatch) -> None:
+    drawn = []
+    monkeypatch.setattr(
+        ai_usage, "_draw_fit", lambda _draw, _center, text, *_args, **_kwargs: drawn.append(text)
+    )
+    bottom = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_draw_fit_bottom",
+        lambda _draw, _cx, _bottom, text, *_args, **_kwargs: bottom.append(text),
+    )
+    widget = UsageWidget(pos=1, provider="moonshot", account="", limit="balance")
+
+    render_widget(widget, PROVIDERS)
+
+    assert "¥49" in drawn
+    assert bottom == [".59"]
+
+
+def test_balance_parts() -> None:
+    assert ai_usage._balance_parts(87.32403, "CNY") == ("¥87", ".32")
+    assert ai_usage._balance_parts(123.45, "USD") == ("$123", ".45")
+    assert ai_usage._balance_parts(5.999, "USD") == ("$6", ".00")
+    assert ai_usage._balance_parts(-2.5, "USD") == ("$0", ".00")
+    assert ai_usage._balance_parts(12345.0, "CNY") == ("¥12K", ".345")
+    assert ai_usage._balance_parts(12346.0, "CNY") == ("¥12K", ".346")
+    assert ai_usage._balance_parts(123456.0, "USD") == ("$123K", ".456")
+    assert ai_usage._balance_parts(1500.0, "USD") == ("$1K", ".500")
+    assert ai_usage._balance_parts(12345678.0, "USD") == ("$12M", ".345")
+    assert ai_usage._balance_parts(45_000_000_000.0, "USD") == ("$45B", ".000")
+    assert ai_usage._balance_parts(999500.0, "USD") == ("$999K", ".500")
+    assert ai_usage._balance_parts(12.5, "EUR") == ("EUR 12", ".50")
+
+
+def test_draw_fit_reference_keeps_short_text_at_reference_size(monkeypatch) -> None:
+    img = Image.new("RGB", (196, 196))
+    draw = ImageDraw.Draw(img)
+    sizes = {}
+    monkeypatch.setattr(
+        ai_usage,
+        "_draw_centered",
+        lambda _draw, _center, text, font, _fill: sizes.update({text: font.size}),
+    )
+    reference = "$00M"
+    ai_usage._draw_fit(draw, (98, 98), "$12", 56, (0, 0, 0), 156, reference=reference)
+    ai_usage._draw_fit(draw, (98, 98), "$123", 56, (0, 0, 0), 156, reference=reference)
+    ai_usage._draw_fit(draw, (98, 98), "$12K", 56, (0, 0, 0), 156, reference=reference)
+    ai_usage._draw_fit(draw, (98, 98), "$123K", 56, (0, 0, 0), 156, reference=reference)
+
+    assert sizes["$12"] == sizes["$123"] == sizes["$12K"]
+    assert sizes["$123K"] < sizes["$123"]
 
 
 def test_jwt_email() -> None:
@@ -506,6 +693,7 @@ async def test_fetch_usage_timeout(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_claude", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_codex", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", timed_out)
+    monkeypatch.setattr(ai_usage, "_fetch_moonshot", timed_out)
     result = await ai_usage.fetch_usage(timeout=0.1)
     assert result.status is FetchStatus.TIMEOUT
     assert result.data is None

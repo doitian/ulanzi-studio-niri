@@ -1,8 +1,9 @@
-"""Fetch and render Claude, Codex, and OpenCode Go usage for D200X buttons.
+"""Fetch and render Claude, Codex, OpenCode Go, and Moonshot usage for D200X buttons.
 
 Provider credentials are read from the files maintained by their CLIs. Usage
 is fetched directly from each provider without an additional command-line
-program.
+program. Moonshot (Kimi API) is pay-as-you-go, so instead of a rate-limit
+window it reports the remaining account balance.
 """
 
 from __future__ import annotations
@@ -44,9 +45,11 @@ WIDGET_SIZE = STD_ICON  # (196, 196)
 
 @dataclass
 class UsageLimit:
-    remaining_percent: float
+    remaining_percent: float | None
     resets_at: str
     reset_after_seconds: float
+    remaining_amount: float | None = None  # pay-as-you-go balance (Moonshot)
+    currency: str = ""
 
 
 class FetchStatus(Enum):
@@ -70,6 +73,11 @@ _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 _CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
+_MOONSHOT_BALANCE_URL_AI = "https://api.moonshot.ai/v1/users/me/balance"
+_MOONSHOT_BALANCE_URL_CN = "https://api.moonshot.cn/v1/users/me/balance"
+# (green, yellow) minimum available balance; below yellow the widget turns red
+_MOONSHOT_BALANCE_THRESHOLDS = {"USD": (12.0, 6.0), "CNY": (70.0, 36.0)}
+_CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥"}
 _REFRESH_SKEW_SECONDS = 30
 
 
@@ -164,16 +172,22 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
         asyncio.to_thread(_fetch_claude, timeout),
         asyncio.to_thread(_fetch_codex, timeout),
         asyncio.to_thread(_fetch_opencode_go, timeout),
+        asyncio.to_thread(_fetch_moonshot, timeout),
     ]
     try:
-        claude, codex, opencode_go = await asyncio.wait_for(
+        claude, codex, opencode_go, moonshot = await asyncio.wait_for(
             asyncio.gather(*tasks), timeout=timeout + 1
         )
     except TimeoutError:
         log.error("usage fetch timed out after %.0fs", timeout)
         return UsageFetchResult(FetchStatus.TIMEOUT)
 
-    providers = {"claude": claude, "codex": codex, "opencode-go": opencode_go}
+    providers = {
+        "claude": claude,
+        "codex": codex,
+        "opencode-go": opencode_go,
+        "moonshot": moonshot,
+    }
     status = (
         FetchStatus.ERROR
         if any("error" in value for value in providers.values())
@@ -501,6 +515,62 @@ def _fetch_opencode_go(timeout: float) -> dict:
         return _provider_error(str(exc))
 
 
+def _moonshot_credential() -> tuple[str, str, str]:
+    """Resolve the Kimi API key to (key, balance URL, currency).
+
+    ``MOONSHOT_API_KEY`` wins and targets the international platform
+    (api.moonshot.ai, USD); set ``MOONSHOT_BASE_URL`` (including ``/v1``) for
+    the China platform. Otherwise the key is read from OpenCode's auth.json,
+    which keeps separate ``moonshotai`` (USD) and ``moonshotai-cn`` (CNY)
+    entries for the two platforms.
+    """
+    key = os.environ.get("MOONSHOT_API_KEY", "").strip()
+    if key:
+        base = os.environ.get("MOONSHOT_BASE_URL", "").strip()
+        if not base:
+            return key, _MOONSHOT_BALANCE_URL_AI, "USD"
+        currency = "CNY" if ".cn" in base else "USD"
+        return key, f"{base.rstrip('/')}/users/me/balance", currency
+
+    data_home = os.environ.get("XDG_DATA_HOME", "").strip()
+    root = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
+    path = root / "opencode" / "auth.json"
+    auth = _read_json(path)
+    for provider_id, url, currency in (
+        ("moonshotai", _MOONSHOT_BALANCE_URL_AI, "USD"),
+        ("moonshotai-cn", _MOONSHOT_BALANCE_URL_CN, "CNY"),
+    ):
+        credential = auth.get(provider_id)
+        if not isinstance(credential, dict):
+            continue
+        stored_key = credential.get("key")
+        if credential.get("type") == "api" and isinstance(stored_key, str) and stored_key:
+            return stored_key, url, currency
+    raise RuntimeError(
+        "moonshot API key not found — set MOONSHOT_API_KEY or `/connect` Moonshot AI in `opencode`"
+    )
+
+
+def _fetch_moonshot(timeout: float) -> dict:
+    try:
+        key, url, currency = _moonshot_credential()
+        response = _request_json(url, key, timeout)
+        data = response.get("data")
+        if response.get("code") != 0 or not isinstance(data, dict):
+            raise RuntimeError("moonshot balance response missing data object")
+        available = data.get("available_balance")
+        if not isinstance(available, (int, float)):
+            raise RuntimeError("moonshot balance response missing available_balance")
+        limit = {
+            "remaining_amount": float(available),
+            "currency": currency,
+        }
+        return {"accounts": [_account("", {"balance": limit})]}
+    except (RuntimeError, TypeError, ValueError) as exc:
+        log.warning("Moonshot balance fetch failed: %s", exc)
+        return _provider_error(str(exc))
+
+
 _AUTH_ERROR_MARKERS = (
     "auth denied",
     "auth missing",
@@ -558,10 +628,14 @@ def resolve_limit(providers: dict, provider: str, account: str, limit: str) -> U
     lim = limits.get(limit)
     if not isinstance(lim, dict):
         return None
+    percent = lim.get("remaining_percent")
+    amount = lim.get("remaining_amount")
     return UsageLimit(
-        remaining_percent=float(lim.get("remaining_percent", 0.0)),
+        remaining_percent=float(percent) if percent is not None else None,
         resets_at=str(lim.get("resets_at", "")),
         reset_after_seconds=float(lim.get("reset_after_seconds", 0.0)),
+        remaining_amount=float(amount) if amount is not None else None,
+        currency=str(lim.get("currency", "")),
     )
 
 
@@ -674,6 +748,59 @@ def format_reset(seconds: float) -> str:
     return f"{minutes}m"
 
 
+def format_balance(amount: float, currency: str) -> str:
+    """Render a pay-as-you-go balance with its currency symbol, e.g. ``"$4.96"``."""
+    symbol = _CURRENCY_SYMBOLS.get(currency)
+    if symbol is None:
+        return f"{currency} {amount:.2f}".lstrip()
+    return f"{symbol}{amount:.2f}"
+
+
+_COMPACT_SUFFIXES = ("K", "M", "B", "T")
+
+
+def _balance_prefix(currency: str) -> str:
+    symbol = _CURRENCY_SYMBOLS.get(currency)
+    return symbol if symbol is not None else f"{currency} ".lstrip()
+
+
+def _balance_parts(amount: float, currency: str) -> tuple[str, str]:
+    """Split a balance into a short center text and a decimal-part footer.
+
+    The widget renders the center large and the footer in the reset-time row,
+    so the center stays short enough for a large font: at most 3 integer
+    digits with 2 decimals in the footer (``"¥123"`` / ``".45"``), or a
+    compact suffix with 3 decimals (``"¥12K"`` / ``".345"``) above 999.
+    Negative amounts clamp to 0. All math is done in integer cents so decimal
+    digits are exact.
+    """
+    prefix = _balance_prefix(currency)
+    cents = round(max(0.0, amount) * 100)
+    integer, frac = divmod(cents, 100)
+    if integer <= 999:
+        return f"{prefix}{integer}", f".{frac:02d}"
+    divisor = 100
+    suffix = _COMPACT_SUFFIXES[-1]
+    for candidate in _COMPACT_SUFFIXES:
+        divisor *= 1000
+        suffix = candidate
+        if cents // divisor < 1000:
+            break
+    frac3 = (cents % divisor) * 1000 // divisor
+    return f"{prefix}{cents // divisor}{suffix}", f".{frac3:03d}"
+
+
+def _balance_color(amount: float, currency: str) -> tuple[int, int, int]:
+    green_min, yellow_min = _MOONSHOT_BALANCE_THRESHOLDS.get(
+        currency, _MOONSHOT_BALANCE_THRESHOLDS["USD"]
+    )
+    if amount < yellow_min:
+        return _COLOR_RED
+    if amount < green_min:
+        return _COLOR_YELLOW
+    return _COLOR_GREEN
+
+
 def _default_label(widget: UsageWidget) -> str:
     return {
         "five_hour": "5H",
@@ -682,6 +809,7 @@ def _default_label(widget: UsageWidget) -> str:
         "rolling": "5H",
         "weekly": "7D",
         "monthly": "30D",
+        "balance": "BAL",
     }[widget.limit]
 
 
@@ -709,10 +837,22 @@ def _draw_fit(
     max_width: int,
     *,
     min_size: int = 10,
+    reference: str | None = None,
 ) -> None:
-    """Center ``text`` at ``center``, shrinking the font to fit ``max_width``."""
+    """Center ``text`` at ``center``, shrinking the font to fit ``max_width``.
+
+    With ``reference``, the font size is chosen to fit the reference instead
+    and ``text`` only shrinks further when wider than the reference, so short
+    values render at the same size as reference-length ones.
+    """
+    target = reference if reference is not None else text
     size = font_size
-    while size >= min_size:
+    while size > min_size:
+        bbox = draw.textbbox((0, 0), target, font=load_font(size))
+        if bbox[2] - bbox[0] <= max_width:
+            break
+        size -= 2
+    while size > min_size:
         font = load_font(size)
         bbox = draw.textbbox((0, 0), text, font=font)
         if bbox[2] - bbox[0] <= max_width:
@@ -811,6 +951,8 @@ def render_widget(
     if icon is not None:
         img.paste(icon, (size - padding - icon.width, padding), icon)
 
+    footer: str | None = None
+    reference: str | None = None
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
         color = _COLOR_RED
@@ -827,23 +969,31 @@ def render_widget(
         else:
             pct = "n/a"
             color = _COLOR_GRAY
-    elif info.remaining_percent >= 60:
-        pct = f"{info.remaining_percent:.0f}%"
-        color = _COLOR_GREEN
-    elif info.remaining_percent >= 30:
-        pct = f"{info.remaining_percent:.0f}%"
-        color = _COLOR_YELLOW
+    elif info.remaining_amount is not None:
+        pct, footer = _balance_parts(info.remaining_amount, info.currency)
+        # "00M" is the widest 4-glyph form (2 digits + suffix), so any balance
+        # of up to 3 glyphs after the symbol renders at the same font size.
+        reference = f"{_balance_prefix(info.currency)}00M"
+        color = _balance_color(info.remaining_amount, info.currency)
     else:
-        pct = f"{info.remaining_percent:.0f}%"
-        color = _COLOR_RED
-    _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width)
+        percent = info.remaining_percent or 0.0
+        pct = f"{percent:.0f}%"
+        if percent >= 60:
+            color = _COLOR_GREEN
+        elif percent >= 30:
+            color = _COLOR_YELLOW
+        else:
+            color = _COLOR_RED
+    _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width, reference=reference)
 
-    if info is not None:
+    if footer is None and info is not None and info.remaining_amount is None:
+        footer = format_reset(info.reset_after_seconds)
+    if footer is not None:
         _draw_fit_bottom(
             draw,
             cx,
             size - LABEL_BOTTOM_PADDING,
-            format_reset(info.reset_after_seconds),
+            footer,
             28,
             (180, 180, 180),
             max_width,

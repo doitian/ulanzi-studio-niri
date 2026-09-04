@@ -45,6 +45,20 @@ def _report() -> dict:
                     }
                 ]
             },
+            "moonshot": {
+                "accounts": [
+                    {
+                        "email": "",
+                        "active": True,
+                        "limits": {
+                            "balance": {
+                                "remaining_amount": 97.32403,
+                                "currency": "CNY",
+                            },
+                        },
+                    }
+                ]
+            },
         }
     }
 
@@ -65,6 +79,8 @@ def test_format_usage_report() -> None:
     assert "OpenCode Go" in text
     assert "5-hour rolling: 75% remaining, resets in 1h0m" in text
     assert "Monthly: 90% remaining, resets in 1d0h" in text
+    assert "Moonshot" in text
+    assert "Balance: ¥97.32 available" in text
 
 
 def test_usage_subcommand_prints_partial_success(monkeypatch, capsys) -> None:

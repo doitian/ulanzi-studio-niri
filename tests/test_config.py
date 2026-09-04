@@ -264,6 +264,50 @@ def test_widget_opencode_go_rejects_other_provider_limits() -> None:
         )
 
 
+def test_widget_moonshot_balance_parses() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "moonshot"
+        limit = "balance"
+        """
+    )
+    widget = cfg.page[0].widget[0]
+    assert widget.provider == "moonshot"
+    assert widget.limit == "balance"
+
+
+def test_widget_moonshot_rejects_other_provider_limits() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "moonshot"
+            limit = "weekly"
+            """
+        )
+
+
+def test_widget_balance_rejected_for_other_providers() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "claude"
+            limit = "balance"
+            """
+        )
+
+
 def test_widget_bad_pos_rejected() -> None:
     with pytest.raises(ValidationError):
         _load(

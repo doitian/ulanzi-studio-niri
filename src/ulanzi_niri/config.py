@@ -181,9 +181,11 @@ class UsageWidget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pos: int
-    provider: Literal["claude", "codex", "opencode-go"]
+    provider: Literal["claude", "codex", "opencode-go", "moonshot"]
     account: str = ""  # empty = the provider's active account
-    limit: Literal["five_hour", "seven_day", "seven_day_fable", "rolling", "weekly", "monthly"]
+    limit: Literal[
+        "five_hour", "seven_day", "seven_day_fable", "rolling", "weekly", "monthly", "balance"
+    ]
     label: str = ""
     icon: str | None = None
 
@@ -193,6 +195,7 @@ class UsageWidget(BaseModel):
             "claude": {"five_hour", "seven_day", "seven_day_fable"},
             "codex": {"five_hour", "seven_day"},
             "opencode-go": {"rolling", "weekly", "monthly"},
+            "moonshot": {"balance"},
         }
         if self.limit not in allowed[self.provider]:
             raise ValueError(

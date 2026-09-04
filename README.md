@@ -16,11 +16,11 @@ Buttons can:
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
 
-LCD buttons can show remaining Claude, Codex, and OpenCode Go plan usage. The
-daemon reads credentials maintained by `claude /login`, `codex login`, and
-OpenCode `/connect`, then fetches usage directly from each provider. Configure
-one `[[page.widget]]` per provider/window; each renders on the button at its
-`pos`:
+LCD buttons can show remaining Claude, Codex, and OpenCode Go plan usage, plus
+the Moonshot (Kimi API) account balance. The daemon reads credentials
+maintained by `claude /login`, `codex login`, and OpenCode `/connect`, then
+fetches usage directly from each provider. Configure one `[[page.widget]]` per
+provider/window; each renders on the button at its `pos`:
 
 ```toml
 [[page.widget]]
@@ -45,6 +45,25 @@ label = "GO 5H"
 Its API key is read from the `opencode-go` entry in
 `$XDG_DATA_HOME/opencode/auth.json` (normally
 `~/.local/share/opencode/auth.json`). Set `OPENCODE_GO_API_KEY` to override it.
+
+Moonshot's Kimi API is pay-as-you-go, so its widget shows the remaining
+account balance instead of a percentage, colored green / yellow / red as it
+drops below ¥70 / ¥36 (CNY) or $12 / $6 (USD):
+
+```toml
+[[page.widget]]
+pos = 3
+provider = "moonshot"
+limit = "balance"           # balance only
+label = "BAL"
+icon = "moonshot"
+```
+
+The API key is read from `MOONSHOT_API_KEY` (international platform,
+api.moonshot.ai, USD; set `MOONSHOT_BASE_URL` including `/v1` for the China
+platform) or from the `moonshotai` / `moonshotai-cn` entries in OpenCode's
+`auth.json`, which select the international / China (api.moonshot.cn, CNY)
+platforms respectively.
 
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
 widget shows the remaining percentage and reset time. Provider data is fetched

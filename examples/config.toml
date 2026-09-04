@@ -180,9 +180,10 @@ mode = "time-weekday"
 # ...
 
 # ----------------------------------------------------------------------- usage page
-# A page that shows remaining Claude/Codex/OpenCode Go usage on LCD buttons.
-# Uses credentials maintained by `claude /login`, `codex login`, and OpenCode
-# `/connect`. Provider data is fetched directly and refreshed every 30 minutes.
+# A page that shows remaining Claude/Codex/OpenCode Go usage and the Moonshot
+# (Kimi API) account balance on LCD buttons. Uses credentials maintained by
+# `claude /login`, `codex login`, and OpenCode `/connect`. Provider data is
+# fetched directly and refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
 # [[page]]
@@ -252,6 +253,19 @@ mode = "time-weekday"
 # limit = "monthly"
 # label = "1M"
 # icon = "opencode"
+#
+# Moonshot (Kimi API) is pay-as-you-go, so it shows the remaining balance
+# instead of a percentage. The API key is read from MOONSHOT_API_KEY (with
+# optional MOONSHOT_BASE_URL) or the `moonshotai` / `moonshotai-cn` entries in
+# OpenCode's auth.json; moonshotai-cn targets the China platform (CNY).
+#
+# [[page.widget]]
+# pos = 8
+# provider = "moonshot"
+# account = ""
+# limit = "balance"
+# label = "BAL"
+# icon = "moonshot"
 #
 # [[page.button]]
 # pos = 14

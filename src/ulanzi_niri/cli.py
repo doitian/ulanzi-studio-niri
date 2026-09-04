@@ -139,6 +139,7 @@ def _human_limit_name(name: str) -> str:
         "rolling": "5-hour rolling",
         "weekly": "Weekly",
         "monthly": "Monthly",
+        "balance": "Balance",
     }.get(name, name.replace("_", " "))
 
 
@@ -151,19 +152,22 @@ def _human_percent(value: object) -> str:
 
 def _format_usage_report(data: dict | None) -> tuple[str, bool]:
     """Return display text and whether at least one provider succeeded."""
-    from .ai_usage import format_reset
+    from .ai_usage import format_balance, format_reset
 
     providers = data.get("providers") if isinstance(data, dict) else None
     if not isinstance(providers, dict):
         return "No usage data available.", False
 
-    provider_names = [name for name in ("claude", "codex", "opencode-go") if name in providers]
+    provider_names = [
+        name for name in ("claude", "codex", "opencode-go", "moonshot") if name in providers
+    ]
     provider_names.extend(sorted(name for name in providers if name not in provider_names))
     sections: list[str] = []
     any_success = False
     limit_order = {
         "five_hour": 0,
         "rolling": 0,
+        "balance": 0,
         "seven_day": 1,
         "weekly": 1,
         "seven_day_fable": 2,
@@ -202,6 +206,11 @@ def _format_usage_report(data: dict | None) -> tuple[str, bool]:
             for name in names:
                 limit = limits[name]
                 if not isinstance(limit, dict):
+                    continue
+                amount = limit.get("remaining_amount")
+                if amount is not None:
+                    balance = format_balance(float(amount), str(limit.get("currency", "")))
+                    lines.append(f"  {_human_limit_name(name)}: {balance} available")
                     continue
                 remaining = _human_percent(limit.get("remaining_percent"))
                 reset = format_reset(float(limit.get("reset_after_seconds", 0)))
