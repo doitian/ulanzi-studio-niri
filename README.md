@@ -85,7 +85,8 @@ concurrently in the background (never blocking the event loop) and updated
 automatically when the fetch completes. Results are cached for 30 minutes to
 limit provider API traffic. Claude and Codex access tokens near expiry are
 refreshed using the CLI's refresh token and the rotated credentials are written
-back atomically.
+back atomically. If a usage request returns HTTP 401, its access token is
+refreshed and the request is retried once.
 HTTP 429 responses are not retried automatically. Add a
 `{ type = "refresh" }` button to request a manual refresh. Manual refreshes
 are throttled to one fetch every 90 seconds:

@@ -81,6 +81,12 @@ _CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥"}
 _REFRESH_SKEW_SECONDS = 30
 
 
+class _HTTPStatusError(RuntimeError):
+    def __init__(self, status: int, message: str) -> None:
+        super().__init__(message)
+        self.status = status
+
+
 class UsageFetcher:
     """Serve cached provider usage and refresh it in the background.
 
@@ -94,7 +100,8 @@ class UsageFetcher:
     (``RETRY_BACKOFF_SECONDS``) instead of waiting for the next external
     refresh, so a transient failure recovers on its own. Auth failures (e.g. an
     expired Claude token needing ``claude /login``) are cached as-is and never
-    retried — the renderer surfaces them as ``401``.
+    retried in the background after the request's one refresh-token attempt —
+    the renderer surfaces them as ``401``.
     """
 
     def __init__(self, *, ttl: float = USAGE_TTL_SECONDS) -> None:
@@ -226,7 +233,9 @@ def _request_json(
         retry_after = exc.headers.get("Retry-After", "")
         prefix = "rate limited: " if exc.code == 429 else ""
         suffix = f" (retry after {retry_after}s)" if retry_after else ""
-        raise RuntimeError(f"{prefix}HTTP {exc.code} from {url}: {detail}{suffix}") from exc
+        raise _HTTPStatusError(
+            exc.code, f"{prefix}HTTP {exc.code} from {url}: {detail}{suffix}"
+        ) from exc
     except (URLError, TimeoutError, OSError) as exc:
         raise RuntimeError(f"request to {url} failed: {exc}") from exc
     if len(raw) > 1024 * 1024:
@@ -317,7 +326,9 @@ def _refresh_token(url: str, client_id: str, refresh_token: str, timeout: float)
     return result
 
 
-def _claude_access_token(path: Path, credential: dict, timeout: float) -> str:
+def _claude_access_token(
+    path: Path, credential: dict, timeout: float, *, force_refresh: bool = False
+) -> str:
     oauth = credential.get("claudeAiOauth", {})
     if not isinstance(oauth, dict):
         raise RuntimeError("claude token not found — run `claude /login`")
@@ -325,7 +336,9 @@ def _claude_access_token(path: Path, credential: dict, timeout: float) -> str:
     if not isinstance(token, str) or not token:
         raise RuntimeError("claude token not found — run `claude /login`")
     expires_at = float(oauth.get("expiresAt", 0)) / 1000
-    if expires_at and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS:
+    if force_refresh or (
+        expires_at and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
+    ):
         original = copy.deepcopy(credential)
         refreshed = _refresh_token(
             _CLAUDE_TOKEN_URL, _CLAUDE_CLIENT_ID, str(oauth.get("refreshToken", "")), timeout
@@ -341,7 +354,9 @@ def _claude_access_token(path: Path, credential: dict, timeout: float) -> str:
     return token
 
 
-def _codex_access_token(path: Path, credential: dict, timeout: float) -> str:
+def _codex_access_token(
+    path: Path, credential: dict, timeout: float, *, force_refresh: bool = False
+) -> str:
     tokens = credential.get("tokens", {})
     if not isinstance(tokens, dict):
         raise RuntimeError("codex token not found — run `codex login`")
@@ -349,8 +364,9 @@ def _codex_access_token(path: Path, credential: dict, timeout: float) -> str:
     if not isinstance(token, str) or not token:
         raise RuntimeError("codex token not found — run `codex login`")
     expires_at = _jwt_claim(token, "exp")
-    if isinstance(expires_at, (int, float)) and (
-        expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
+    if force_refresh or (
+        isinstance(expires_at, (int, float))
+        and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
     ):
         original = copy.deepcopy(credential)
         refreshed = _refresh_token(
@@ -364,6 +380,23 @@ def _codex_access_token(path: Path, credential: dict, timeout: float) -> str:
         _write_json_atomic(path, credential, expected=original)
         token = str(tokens["access_token"])
     return token
+
+
+def _request_json_retry_unauthorized(
+    url: str,
+    token: str,
+    timeout: float,
+    refresh: Callable[[], str],
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> dict:
+    """Refresh the access token and retry once when a request returns HTTP 401."""
+    try:
+        return _request_json(url, token, timeout, extra_headers=extra_headers)
+    except _HTTPStatusError as exc:
+        if exc.status != 401:
+            raise
+    return _request_json(url, refresh(), timeout, extra_headers=extra_headers)
 
 
 def _limit(used: float, resets_at: str | int | float) -> dict:
@@ -389,17 +422,20 @@ def _account(email: str, limits: dict, *, error: str | None = None) -> dict:
 
 
 def _provider_error(message: str) -> dict:
-    auth = (
-        "auth denied"
-        if any(
-            marker in message
-            for marker in ("HTTP 401", "HTTP 403", "invalid_grant", "already been used")
-        )
-        else "auth missing"
-    )
-    if "HTTP " in message and auth == "auth missing":
-        auth = "request failed"
-    return {"error": f"{auth}: {message}"}
+    lowered = message.lower()
+    if any(
+        marker in lowered
+        for marker in ("http 401", "http 403", "invalid_grant", "already been used")
+    ):
+        kind = "auth denied"
+    elif any(
+        marker in lowered
+        for marker in ("token not found", "credential expired", "no refresh token")
+    ):
+        kind = "auth missing"
+    else:
+        kind = "request failed"
+    return {"error": f"{kind}: {message}"}
 
 
 def _fetch_claude(timeout: float) -> dict:
@@ -408,7 +444,13 @@ def _fetch_claude(timeout: float) -> dict:
         raw_credential = _read_json(path)
         token = _claude_access_token(path, raw_credential, timeout)
         headers = {"Anthropic-Beta": "oauth-2025-04-20", "User-Agent": "claude-code/0.0.0-dev"}
-        usage = _request_json(_CLAUDE_USAGE_URL, token, timeout, extra_headers=headers)
+        usage = _request_json_retry_unauthorized(
+            _CLAUDE_USAGE_URL,
+            token,
+            timeout,
+            lambda: _claude_access_token(path, raw_credential, timeout, force_refresh=True),
+            extra_headers=headers,
+        )
         limits: dict[str, dict] = {}
         for key in ("five_hour", "seven_day", "seven_day_sonnet"):
             window = usage.get(key)
@@ -456,7 +498,12 @@ def _fetch_codex(timeout: float) -> dict:
         raw_credential = _read_json(path)
         tokens = raw_credential.get("tokens", {})
         token = _codex_access_token(path, raw_credential, timeout)
-        usage = _request_json(_CODEX_USAGE_URL, token, timeout)
+        usage = _request_json_retry_unauthorized(
+            _CODEX_USAGE_URL,
+            token,
+            timeout,
+            lambda: _codex_access_token(path, raw_credential, timeout, force_refresh=True),
+        )
         rate_limit = usage.get("rate_limit")
         if not isinstance(rate_limit, dict):
             raise RuntimeError("codex usage response missing rate_limit object")

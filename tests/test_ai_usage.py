@@ -6,6 +6,7 @@ import base64
 import io
 import json
 
+import pytest
 from PIL import Image, ImageDraw
 
 from ulanzi_niri import ai_usage
@@ -210,6 +211,27 @@ def test_result_auth_denied() -> None:
         is True
     )
     assert result_auth_denied({"providers": {"claude": {"error": "auth missing"}}}) is True
+
+
+def test_provider_error_does_not_classify_transport_failure_as_auth() -> None:
+    provider = ai_usage._provider_error(
+        "request to https://api.anthropic.com failed: SSL: UNEXPECTED_EOF_WHILE_READING"
+    )
+
+    assert provider == {
+        "error": "request failed: request to https://api.anthropic.com failed: "
+        "SSL: UNEXPECTED_EOF_WHILE_READING"
+    }
+    assert result_auth_denied({"providers": {"claude": provider}}) is False
+
+
+def test_provider_error_classifies_missing_and_rejected_credentials() -> None:
+    assert ai_usage._provider_error("claude token not found") == {
+        "error": "auth missing: claude token not found"
+    }
+    assert ai_usage._provider_error("HTTP 401 from https://example.test") == {
+        "error": "auth denied: HTTP 401 from https://example.test"
+    }
 
 
 def test_render_widget_auth_error() -> None:
@@ -675,6 +697,71 @@ def test_codex_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     assert token == "new-access"
     assert credential["tokens"]["refresh_token"] == "new-refresh"
     assert credential["tokens"]["id_token"] == "new-id"
+
+
+def test_request_refreshes_and_retries_once_after_401(monkeypatch) -> None:
+    requested_tokens = []
+    refreshed = []
+
+    def request(_url, token, _timeout, **_kwargs):
+        requested_tokens.append(token)
+        if len(requested_tokens) == 1:
+            raise ai_usage._HTTPStatusError(401, "HTTP 401")
+        return {"ok": True}
+
+    monkeypatch.setattr(ai_usage, "_request_json", request)
+
+    result = ai_usage._request_json_retry_unauthorized(
+        "https://example.test/usage",
+        "old-access",
+        5,
+        lambda: refreshed.append(True) or "new-access",
+    )
+
+    assert result == {"ok": True}
+    assert requested_tokens == ["old-access", "new-access"]
+    assert refreshed == [True]
+
+
+def test_request_does_not_refresh_or_retry_non_401(monkeypatch) -> None:
+    refreshed = []
+
+    def request(*_args, **_kwargs):
+        raise ai_usage._HTTPStatusError(403, "HTTP 403")
+
+    monkeypatch.setattr(ai_usage, "_request_json", request)
+
+    with pytest.raises(ai_usage._HTTPStatusError, match="HTTP 403"):
+        ai_usage._request_json_retry_unauthorized(
+            "https://example.test/usage",
+            "old-access",
+            5,
+            lambda: refreshed.append(True) or "new-access",
+        )
+
+    assert refreshed == []
+
+
+def test_request_surfaces_second_401_without_another_refresh(monkeypatch) -> None:
+    attempts = []
+    refreshed = []
+
+    def request(_url, token, _timeout, **_kwargs):
+        attempts.append(token)
+        raise ai_usage._HTTPStatusError(401, "HTTP 401")
+
+    monkeypatch.setattr(ai_usage, "_request_json", request)
+
+    with pytest.raises(ai_usage._HTTPStatusError, match="HTTP 401"):
+        ai_usage._request_json_retry_unauthorized(
+            "https://example.test/usage",
+            "old-access",
+            5,
+            lambda: refreshed.append(True) or "new-access",
+        )
+
+    assert attempts == ["old-access", "new-access"]
+    assert refreshed == [True]
 
 
 def test_rate_limited_result_is_detected() -> None:
