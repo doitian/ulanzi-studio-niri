@@ -115,3 +115,8 @@ def test_usage_subcommand_fails_without_provider_data(monkeypatch, capsys) -> No
 def test_usage_subcommand_rejects_invalid_timeout(capsys) -> None:
     assert cli.main(["ai-usage", "--timeout", "0"]) == 2
     assert "timeout must be greater than zero" in capsys.readouterr().err
+
+
+def test_version_subcommand(capsys) -> None:
+    assert cli.main(["version"]) == 0
+    assert capsys.readouterr().out.startswith("ulanzi-niri ")

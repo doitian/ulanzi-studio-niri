@@ -58,6 +58,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
+    sub.add_parser("version", help="print the package version")
+
     return parser
 
 
@@ -82,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_sniff(args)
     if cmd == "install-udev":
         return _cmd_install_udev()
+    if cmd == "version":
+        return _cmd_version()
     return 2
 
 
@@ -126,6 +130,16 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
 
         present = which(tool)
         print(f"  {tool:10}{'present at ' + present if present else 'not found'}")
+    return 0
+
+
+def _cmd_version() -> int:
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        print(f"ulanzi-niri {version('ulanzi-studio-niri')}")
+    except PackageNotFoundError:
+        print("ulanzi-niri (not installed as a package)")
     return 0
 
 
