@@ -12,8 +12,10 @@ from watchfiles import awatch
 from .actions import ActionContext, dispatch
 from .ai_usage import UsageFetcher, render_widget
 from .config import (
+    PROVIDER_URLS,
     Config,
     PageConfig,
+    UrlAction,
     WideTileEntry,
     load_config,
 )
@@ -217,6 +219,8 @@ class Service:
             return
         button = next((b for b in self._pages.current.button if b.pos == pos), None)
         if button is None:
+            if event.pressed:
+                await self._open_widget_url(pos)
             return
         ctx = ActionContext(self, self._pages.name, f"button:{pos}")
         loop = asyncio.get_running_loop()
@@ -253,6 +257,18 @@ class Service:
                 await dispatch(button.on_press, ctx)
             if button.on_release is not None:
                 await dispatch(button.on_release, ctx)
+
+    async def _open_widget_url(self, pos: int) -> None:
+        widget = next((w for w in self._pages.current.widget if w.pos == pos), None)
+        if widget is None:
+            return
+        url = widget.url or PROVIDER_URLS.get(widget.provider)
+        if not url:
+            return
+        await dispatch(
+            UrlAction(type="url", url=url),
+            ActionContext(self, self._pages.name, f"widget:{pos}"),
+        )
 
     async def _on_encoder_press(self, event: DeckEvent) -> None:
         idx = event.encoder_index

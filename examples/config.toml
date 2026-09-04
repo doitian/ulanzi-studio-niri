@@ -186,6 +186,10 @@ mode = "time-weekday"
 # fetched directly and refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
+# Pressing a usage button opens the provider's usage page in the browser
+# (defaults: claude.ai, chatgpt.com, opencode.ai/go, platform.kimi.com);
+# set `url` on a widget to override it.
+#
 # [[page]]
 # name = "usage"
 # layer = "home"
@@ -266,6 +270,7 @@ mode = "time-weekday"
 # limit = "balance"
 # label = "BAL"
 # icon = "moonshot"
+# url = "https://platform.kimi.com/console/account"  # override the press URL
 #
 # [[page.button]]
 # pos = 14

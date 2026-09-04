@@ -278,6 +278,7 @@ def test_widget_moonshot_balance_parses() -> None:
     widget = cfg.page[0].widget[0]
     assert widget.provider == "moonshot"
     assert widget.limit == "balance"
+    assert widget.url is None
 
 
 def test_widget_moonshot_rejects_other_provider_limits() -> None:
@@ -304,6 +305,36 @@ def test_widget_balance_rejected_for_other_providers() -> None:
             pos = 1
             provider = "claude"
             limit = "balance"
+            """
+        )
+
+
+def test_widget_url_parses() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "moonshot"
+        limit = "balance"
+        url = "https://platform.kimi.ai/console/account"
+        """
+    )
+    assert cfg.page[0].widget[0].url == "https://platform.kimi.ai/console/account"
+
+
+def test_widget_url_requires_scheme() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "moonshot"
+            limit = "balance"
+            url = "platform.kimi.com/console/account"
             """
         )
 

@@ -65,6 +65,20 @@ platform) or from the `moonshotai` / `moonshotai-cn` entries in OpenCode's
 `auth.json`, which select the international / China (api.moonshot.cn, CNY)
 platforms respectively.
 
+Pressing a usage button opens the provider's usage page in the browser.
+Defaults: `https://claude.ai/new#settings/usage` (Claude),
+`https://chatgpt.com/#settings/Usage` (Codex), `https://opencode.ai/go`
+(OpenCode Go), `https://platform.kimi.com/console/account` (Moonshot). Set
+`url` on a widget to override:
+
+```toml
+[[page.widget]]
+pos = 4
+provider = "opencode-go"
+limit = "rolling"
+url = "https://opencode.ai/workspace/wrk_xxxxx/go"
+```
+
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
 widget shows the remaining percentage and reset time. Provider data is fetched
 concurrently in the background (never blocking the event loop) and updated

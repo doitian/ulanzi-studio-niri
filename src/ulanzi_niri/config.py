@@ -177,6 +177,14 @@ class EncoderEntry(BaseModel):
         return v
 
 
+PROVIDER_URLS = {
+    "claude": "https://claude.ai/new#settings/usage",
+    "codex": "https://chatgpt.com/#settings/Usage",
+    "opencode-go": "https://opencode.ai/go",
+    "moonshot": "https://platform.kimi.com/console/account",
+}
+
+
 class UsageWidget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -188,6 +196,19 @@ class UsageWidget(BaseModel):
     ]
     label: str = ""
     icon: str | None = None
+    url: str | None = None  # opened on press; defaults to PROVIDER_URLS[provider]
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("url must not be empty")
+        if "://" not in v:
+            raise ValueError(f"url {v!r} must include a scheme (e.g. https://)")
+        return v
 
     @model_validator(mode="after")
     def _validate_limit(self) -> UsageWidget:
