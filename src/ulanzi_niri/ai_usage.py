@@ -28,8 +28,8 @@ from urllib.request import Request, urlopen
 from PIL import Image, ImageDraw
 
 from .config import UsageWidget
+from .icons import LABEL_BOTTOM_PADDING, _load_icon_image, resolve_icon_path
 from .icons import _font as load_font
-from .icons import _load_icon_image, resolve_icon_path
 from .protocol.ulanzi_d200x import STD_ICON
 
 log = logging.getLogger(__name__)
@@ -722,6 +722,35 @@ def _draw_fit(
     _draw_centered(draw, center, text, load_font(min_size), fill)
 
 
+def _draw_fit_bottom(
+    draw: ImageDraw.ImageDraw,
+    cx: int,
+    bottom: int,
+    text: str,
+    font_size: int,
+    fill: tuple[int, int, int],
+    max_width: int,
+    *,
+    min_size: int = 10,
+) -> None:
+    """Draw ``text`` bottom-aligned at ``bottom``, shrinking to fit ``max_width``."""
+    size = font_size
+    while size >= min_size:
+        font = load_font(size)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        if bbox[2] - bbox[0] <= max_width:
+            break
+        size -= 2
+    font = load_font(size)
+    bbox = draw.textbbox((0, 0), text, font=font)
+    draw.text(
+        (cx - (bbox[2] - bbox[0]) // 2 - bbox[0], bottom - (bbox[3] - bbox[1]) - bbox[1]),
+        text,
+        font=font,
+        fill=fill,
+    )
+
+
 def _load_corner_icon(name: str, size: int) -> Image.Image | None:
     """Resolve and scale an app icon to fit in a ``size``x``size`` corner."""
     path = resolve_icon_path(name)
@@ -764,11 +793,23 @@ def render_widget(
     cx = size // 2
     max_width = size - 2 * padding
 
-    draw.text((padding, padding - 4), label, font=load_font(28), fill=(255, 255, 255))
+    icon = None
     if widget.icon:
         icon = _load_corner_icon(widget.icon, 40)
-        if icon is not None:
-            img.paste(icon, (size - padding - icon.width, padding), icon)
+
+    font = load_font(28)
+    bbox = draw.textbbox((0, 0), label, font=font)
+    label_h = bbox[3] - bbox[1]
+    icon_center = padding + icon.height // 2 if icon is not None else None
+    label_y = (
+        icon_center - label_h // 2 - bbox[1]
+        if icon_center is not None
+        else padding - 4
+    )
+    draw.text((padding, label_y), label, font=font, fill=(255, 255, 255))
+
+    if icon is not None:
+        img.paste(icon, (size - padding - icon.width, padding), icon)
 
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
@@ -798,9 +839,10 @@ def render_widget(
     _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width)
 
     if info is not None:
-        _draw_fit(
+        _draw_fit_bottom(
             draw,
-            (cx, size - 36),
+            cx,
+            size - LABEL_BOTTOM_PADDING,
             format_reset(info.reset_after_seconds),
             28,
             (180, 180, 180),

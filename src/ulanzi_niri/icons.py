@@ -30,6 +30,10 @@ _ICON_EXTENSIONS = (".png", ".xpm", ".svg")
 # arbitrarily, so prefer them over any reasonably-sized raster.
 _SVG_RANK_SIZE = 1 << 20
 
+# Bottom padding (px) between a tile's label text and its bottom edge. Shared
+# by the button renderer and the usage widget so they align consistently.
+LABEL_BOTTOM_PADDING = 18
+
 
 def _cache_root() -> Path:
     base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
@@ -233,7 +237,7 @@ def render(req: RenderRequest) -> bytes:
         elif req.align == "middle":
             y = (req.height - th) // 2 - int(bbox[1])
         else:  # bottom
-            y = req.height - th - 18 - int(bbox[1])
+            y = req.height - th - LABEL_BOTTOM_PADDING - int(bbox[1])
         draw.text((x, y), req.label, font=font, fill=_hex_to_rgb(req.label_color))
 
     buf = io.BytesIO()
