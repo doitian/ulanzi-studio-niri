@@ -800,7 +800,7 @@ def render_widget(
     if info is not None:
         _draw_fit(
             draw,
-            (cx, size - 28),
+            (cx, size - 36),
             format_reset(info.reset_after_seconds),
             28,
             (180, 180, 180),
