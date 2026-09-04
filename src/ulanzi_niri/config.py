@@ -78,12 +78,6 @@ class MediaAction(_ActionBase):
     step: int = 5  # percent step for volume
 
 
-class ScreenshotAction(_ActionBase):
-    type: Literal["screenshot"]
-    target: Literal["full", "region", "window"] = "region"
-    output_dir: str | None = None
-
-
 class KeysAction(_ActionBase):
     type: Literal["keys"]
     keys: str
@@ -131,7 +125,6 @@ Action = Annotated[
     | ExecAction
     | UrlAction
     | MediaAction
-    | ScreenshotAction
     | KeysAction
     | PageAction
     | BrightnessAction

@@ -13,8 +13,6 @@ import os
 import shlex
 import shutil
 from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from ..config import (
@@ -27,7 +25,6 @@ from ..config import (
     NoopAction,
     PageAction,
     RefreshAction,
-    ScreenshotAction,
     SmallWindowAction,
     UrlAction,
 )
@@ -115,8 +112,6 @@ async def dispatch(action: Action | None, ctx: ActionContext) -> None:
             await _do_url(action)
         elif isinstance(action, MediaAction):
             await _do_media(action)
-        elif isinstance(action, ScreenshotAction):
-            await _do_screenshot(action)
         elif isinstance(action, KeysAction):
             await _do_keys(action)
         elif isinstance(action, PageAction):
@@ -188,6 +183,29 @@ async def _do_media(action: MediaAction) -> None:
     # playerctl uses "previous" not "prev"
     argv.append("previous" if sub == "prev" else sub)
     await _run_argv(argv)
+
+
+def _screenshot_dir(custom: str | None) -> Path:
+    if custom:
+        return Path(os.path.expandvars(os.path.expanduser(custom)))
+    return Path(os.environ.get("XDG_PICTURES_DIR") or (Path.home() / "Pictures"))
+
+
+async def _do_screenshot(action: ScreenshotAction) -> None:
+    out_dir = _screenshot_dir(action.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    fname = out_dir / f"screenshot-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
+    if shutil.which("grimblast"):
+        target = {"full": "screen", "region": "area", "window": "active"}[action.target]
+        await _run_argv(["grimblast", "save", target, str(fname)])
+        return
+    if shutil.which("grim"):
+        if action.target == "region" and shutil.which("slurp"):
+            await _run_shell(f"grim -g \"$(slurp)\" {shlex.quote(str(fname))}")
+        else:
+            await _run_argv(["grim", str(fname)])
+        return
+    log.error("no screenshot tool found (need grimblast or grim)")
 
 
 def _screenshot_dir(custom: str | None) -> Path:

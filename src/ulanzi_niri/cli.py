@@ -121,7 +121,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         else:
             print("device open:   ok")
             dev.close()
-    for tool in ("niri", "playerctl", "wpctl", "grim", "grimblast", "wtype", "ydotool", "slurp"):
+    for tool in ("niri", "playerctl", "wpctl", "wtype", "ydotool"):
         from shutil import which
 
         present = which(tool)

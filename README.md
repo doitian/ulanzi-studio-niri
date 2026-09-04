@@ -8,7 +8,6 @@ Buttons can:
 - Trigger Niri actions (`niri msg action ...`)
 - Launch arbitrary commands
 - Control media (`playerctl` / `wpctl`)
-- Take screenshots (`grim` / `slurp`)
 - Send keystrokes (`wtype` / `ydotool`)
 - Switch between configured pages
 - Adjust deck brightness
