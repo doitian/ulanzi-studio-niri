@@ -5,7 +5,8 @@ set -euo pipefail
 #   1. `uv tool install` -> ~/.local/bin/ulanzi-niri
 #   2. udev rule (via sudo) -> /etc/udev/rules.d/
 #   3. config link (if config/$(hostname).toml exists)
-#   4. systemd user service -> enable + start
+#   4. icons -> ~/.config/ulanzi-niri/icons/
+#   5. systemd user service -> enable + start
 #
 # Safe to re-run; each step is idempotent.
 
@@ -52,6 +53,10 @@ if [[ -f "${host_config}" ]]; then
 else
   echo "  no config/$(hostname).toml found; skipping"
 fi
+
+say "Installing icons"
+mkdir -p "${config_dir}/icons"
+cp -r "${repo_dir}/icons/." "${config_dir}/icons/"
 
 say "Installing systemd user service"
 mkdir -p "$(dirname "${service_dst}")"
