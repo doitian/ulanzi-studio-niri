@@ -167,7 +167,7 @@ label = "Next"
 on_press = { type = "page", cycle = 1 }
 
 [page.wide_tile]
-mode = "clock"
+mode = "time-weekday"
 
 # Pages share a `layer`. `cycle` (buttons 14/15 above) moves between pages
 # *within the current layer*. A button that does `goto` (or `toggle`) to a page
@@ -246,4 +246,4 @@ mode = "clock"
 # on_press = { type = "refresh" }
 #
 # [page.wide_tile]
-# mode = "time-date"
+# mode = "time-weekday"
