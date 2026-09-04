@@ -185,52 +185,6 @@ async def _do_media(action: MediaAction) -> None:
     await _run_argv(argv)
 
 
-def _screenshot_dir(custom: str | None) -> Path:
-    if custom:
-        return Path(os.path.expandvars(os.path.expanduser(custom)))
-    return Path(os.environ.get("XDG_PICTURES_DIR") or (Path.home() / "Pictures"))
-
-
-async def _do_screenshot(action: ScreenshotAction) -> None:
-    out_dir = _screenshot_dir(action.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fname = out_dir / f"screenshot-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
-    if shutil.which("grimblast"):
-        target = {"full": "screen", "region": "area", "window": "active"}[action.target]
-        await _run_argv(["grimblast", "save", target, str(fname)])
-        return
-    if shutil.which("grim"):
-        if action.target == "region" and shutil.which("slurp"):
-            await _run_shell(f"grim -g \"$(slurp)\" {shlex.quote(str(fname))}")
-        else:
-            await _run_argv(["grim", str(fname)])
-        return
-    log.error("no screenshot tool found (need grimblast or grim)")
-
-
-def _screenshot_dir(custom: str | None) -> Path:
-    if custom:
-        return Path(os.path.expandvars(os.path.expanduser(custom)))
-    return Path(os.environ.get("XDG_PICTURES_DIR") or (Path.home() / "Pictures"))
-
-
-async def _do_screenshot(action: ScreenshotAction) -> None:
-    out_dir = _screenshot_dir(action.output_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-    fname = out_dir / f"screenshot-{datetime.now().strftime('%Y%m%d-%H%M%S')}.png"
-    if shutil.which("grimblast"):
-        target = {"full": "screen", "region": "area", "window": "active"}[action.target]
-        await _run_argv(["grimblast", "save", target, str(fname)])
-        return
-    if shutil.which("grim"):
-        if action.target == "region" and shutil.which("slurp"):
-            await _run_shell(f"grim -g \"$(slurp)\" {shlex.quote(str(fname))}")
-        else:
-            await _run_argv(["grim", str(fname)])
-        return
-    log.error("no screenshot tool found (need grimblast or grim)")
-
-
 async def _do_keys(action: KeysAction) -> None:
     backend = action.backend
     if backend == "auto":
