@@ -382,9 +382,10 @@ def test_wide_tile_time_date_mode_parses() -> None:
     assert cfg.page[0].wide_tile.mode == "time-date"
 
 
-def test_refresh_action_parses() -> None:
-    cfg = _load(
-        """
+def test_refresh_action_is_rejected() -> None:
+    with pytest.raises(ValidationError, match="union_tag_invalid"):
+        _load(
+            """
         [[page]]
         name = "x"
         [[page.button]]
@@ -392,7 +393,4 @@ def test_refresh_action_parses() -> None:
         label = "Refresh"
         on_press = { type = "refresh" }
         """
-    )
-    action = cfg.page[0].button[0].on_press
-    assert action is not None
-    assert action.type == "refresh"
+        )

@@ -65,7 +65,7 @@ platform) or from the `moonshotai` / `moonshotai-cn` entries in OpenCode's
 `auth.json`, which select the international / China (api.moonshot.cn, CNY)
 platforms respectively.
 
-Pressing a usage button opens the provider's usage page in the browser.
+Pressing a usage button requests a refresh and opens the provider's usage page in the browser.
 Defaults: `https://claude.ai/new#settings/usage` (Claude),
 `https://chatgpt.com/#settings/Usage` (Codex), `https://opencode.ai/go`
 (OpenCode Go), `https://platform.kimi.com/console/account` (Moonshot). Set
@@ -87,17 +87,9 @@ limit provider API traffic. Claude and Codex access tokens near expiry are
 refreshed using the CLI's refresh token and the rotated credentials are written
 back atomically. If a usage request returns HTTP 401, its access token is
 refreshed and the request is retried once.
-HTTP 429 responses are not retried automatically. Add a
-`{ type = "refresh" }` button to request a manual refresh. Manual refreshes
-are throttled to one fetch every 90 seconds:
-
-```toml
-[[page.button]]
-pos = 12
-label = "Refresh"
-icon = "view-refresh"
-on_press = { type = "refresh" }
-```
+HTTP 429 responses are not retried automatically. Press any usage widget to
+request a manual refresh. Manual refreshes are throttled to one fetch every
+90 seconds.
 
 The same data is available in a terminal:
 

@@ -186,7 +186,8 @@ mode = "time-weekday"
 # fetched directly and refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
-# Pressing a usage button opens the provider's usage page in the browser
+# Pressing a usage button requests a refresh (throttled to once every 90 seconds)
+# and opens the provider's usage page in the browser
 # (defaults: claude.ai, chatgpt.com, opencode.ai/go, platform.kimi.com);
 # set `url` on a widget to override it.
 #
@@ -281,12 +282,6 @@ mode = "time-weekday"
 # pos = 15
 # label = "Next"
 # on_press = { type = "page", cycle = 1 }
-#
-# [[page.button]]
-# pos = 12 # 13th regular LCD button (zero-based)
-# label = "Refresh"
-# icon = "view-refresh"
-# on_press = { type = "refresh" }
 #
 # [page.wide_tile]
 # mode = "time-weekday"

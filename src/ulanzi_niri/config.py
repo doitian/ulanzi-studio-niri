@@ -115,10 +115,6 @@ class SmallWindowAction(_ActionBase):
     mode: Literal["clock", "stats", "background"]
 
 
-class RefreshAction(_ActionBase):
-    type: Literal["refresh"]
-
-
 Action = Annotated[
     NoopAction
     | NiriAction
@@ -128,8 +124,7 @@ Action = Annotated[
     | KeysAction
     | PageAction
     | BrightnessAction
-    | SmallWindowAction
-    | RefreshAction,
+    | SmallWindowAction,
     Field(discriminator="type"),
 ]
 

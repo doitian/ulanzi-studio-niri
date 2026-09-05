@@ -51,6 +51,7 @@ class Service:
         self._press_state: dict[int, _PressState] = {}
         self._encoder_accum: dict[int, int] = {}
         self._encoder_flush_task: dict[int, asyncio.Task] = {}
+        self._widget_tasks: set[asyncio.Task[None]] = set()
         self._brightness: int = self._cfg.device.brightness
         self._usage = UsageFetcher()
         self._usage.set_on_update(self._on_usage_update)
@@ -262,13 +263,20 @@ class Service:
         widget = next((w for w in self._pages.current.widget if w.pos == pos), None)
         if widget is None:
             return
+        self._usage.refresh(force=True)
         url = widget.url or PROVIDER_URLS.get(widget.provider)
         if not url:
             return
-        await dispatch(
-            UrlAction(type="url", url=url),
-            ActionContext(self, self._pages.name, f"widget:{pos}"),
+        # The browser launcher may take time to exit; keep processing deck events.
+        task = asyncio.create_task(
+            dispatch(
+                UrlAction(type="url", url=url),
+                ActionContext(self, self._pages.name, f"widget:{pos}"),
+            ),
+            name=f"widget:{pos}:url",
         )
+        self._widget_tasks.add(task)
+        task.add_done_callback(self._widget_tasks.discard)
 
     async def _on_encoder_press(self, event: DeckEvent) -> None:
         idx = event.encoder_index
@@ -329,11 +337,6 @@ class Service:
         target = self._cfg.cycle_target(self._pages.name, step)
         if target is not None:
             await self.switch_page(target)
-
-    async def refresh_usage(self) -> None:
-        self._usage.refresh(force=True)
-        if self._device is not None:
-            await self._render_current_page()
 
     async def set_brightness(self, value: int) -> None:
         self._brightness = max(0, min(100, int(value)))
