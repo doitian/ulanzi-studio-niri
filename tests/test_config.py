@@ -394,3 +394,32 @@ def test_refresh_action_is_rejected() -> None:
         on_press = { type = "refresh" }
         """
         )
+
+def test_widget_xai_weekly_parses() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "xai"
+        limit = "weekly"
+        """
+    )
+    widget = cfg.page[0].widget[0]
+    assert widget.provider == "xai"
+    assert widget.limit == "weekly"
+
+
+def test_widget_xai_rejects_other_limits() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "xai"
+            limit = "five_hour"
+            """
+        )
