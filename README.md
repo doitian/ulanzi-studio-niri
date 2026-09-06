@@ -171,7 +171,7 @@ current layer*, wrapping around. A `goto` (or `toggle`) that targets a page in
 another layer switches layers — use this for "folder" buttons that open a
 multi-page group (e.g. a `"web"` layer with several pages).
 
-The wide tile shows an 8px-high page indicator near its bottom edge, with 12px
+The wide tile shows a 12px-high page indicator near its bottom edge, with 12px
 of padding on each side.
 The current page's segment is `#9974F8` on a `#707070` track, in configuration
 order within the current layer. Layers with only one page have no indicator.

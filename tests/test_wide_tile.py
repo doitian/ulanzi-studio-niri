@@ -57,9 +57,9 @@ def test_page_indicator_position_and_colors(index) -> None:
         expected = (112, 112, 112) if 12 <= x < 446 else (0, 0, 0)
         if 12 + index * 434 // 3 <= x < 12 + (index + 1) * 434 // 3:
             expected = (153, 116, 248)
-        for y in range(184, 192):
+        for y in range(180, 192):
             assert image.getpixel((x, y)) == expected
-        assert image.getpixel((x, 183)) == (0, 0, 0)
+        assert image.getpixel((x, 179)) == (0, 0, 0)
         assert image.getpixel((x, 192)) == (0, 0, 0)
 
 
