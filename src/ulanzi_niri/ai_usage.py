@@ -1,4 +1,4 @@
-"""Fetch and render Claude, Codex, OpenCode Go, and Moonshot usage for D200X buttons.
+"""Fetch and render Claude, Codex, OpenCode Go, xAI, and Moonshot usage for D200X buttons.
 
 Provider credentials are read from the files maintained by their CLIs. Usage
 is fetched directly from each provider without an additional command-line
@@ -75,6 +75,8 @@ _CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
 _MOONSHOT_BALANCE_URL_AI = "https://api.moonshot.ai/v1/users/me/balance"
 _MOONSHOT_BALANCE_URL_CN = "https://api.moonshot.cn/v1/users/me/balance"
+_XAI_USAGE_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
+_XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token"
 # (green, yellow) minimum available balance; below yellow the widget turns red
 _MOONSHOT_BALANCE_THRESHOLDS = {"USD": (12.0, 6.0), "CNY": (70.0, 36.0)}
 _CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥"}
@@ -180,9 +182,10 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
         asyncio.to_thread(_fetch_codex, timeout),
         asyncio.to_thread(_fetch_opencode_go, timeout),
         asyncio.to_thread(_fetch_moonshot, timeout),
+        asyncio.to_thread(_fetch_xai, timeout),
     ]
     try:
-        claude, codex, opencode_go, moonshot = await asyncio.wait_for(
+        claude, codex, opencode_go, moonshot, xai = await asyncio.wait_for(
             asyncio.gather(*tasks), timeout=timeout + 1
         )
     except TimeoutError:
@@ -194,6 +197,7 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
         "codex": codex,
         "opencode-go": opencode_go,
         "moonshot": moonshot,
+        "xai": xai,
     }
     status = (
         FetchStatus.ERROR
@@ -618,6 +622,102 @@ def _fetch_moonshot(timeout: float) -> dict:
         return _provider_error(str(exc))
 
 
+def _grok_credentials_path() -> Path:
+    override = os.environ.get("ULANZI_GROK_CREDENTIALS", "").strip()
+    if override:
+        return Path(override).expanduser()
+    home = os.environ.get("GROK_HOME", "").strip()
+    root = Path(home).expanduser() if home else Path.home() / ".grok"
+    return root / "auth.json"
+
+
+def _grok_session(credential: dict) -> dict:
+    for entry in credential.values():
+        if isinstance(entry, dict) and isinstance(entry.get("key"), str) and entry["key"]:
+            return entry
+    raise RuntimeError("grok token not found — run `grok login`")
+
+
+def _grok_limits(data: dict) -> dict:
+    config = data["config"] if isinstance(data.get("config"), dict) else data
+    period = config.get("currentPeriod") if isinstance(config.get("currentPeriod"), dict) else None
+    used = config.get("creditUsagePercent", 0)
+    if not isinstance(used, (int, float)):
+        used = 0
+    resets_at = period.get("end") if period else None
+    if resets_at is None:
+        resets_at = config.get("billingPeriodEnd")
+    if resets_at is None:
+        return {}
+    try:
+        return {"weekly": _limit(float(used), resets_at)}
+    except (TypeError, ValueError):
+        return {}
+
+
+def _grok_access_token(
+    path: Path, credential: dict, timeout: float, *, force_refresh: bool = False
+) -> str:
+    session = _grok_session(credential)
+    token = str(session["key"])
+    expires_at = 0.0
+    raw_expires = session.get("expires_at")
+    if isinstance(raw_expires, str) and raw_expires:
+        try:
+            expires_at = datetime.fromisoformat(raw_expires.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            expires_at = 0.0
+    if not expires_at:
+        exp = _jwt_claim(token, "exp")
+        if isinstance(exp, (int, float)):
+            expires_at = float(exp)
+    if force_refresh or (
+        expires_at and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
+    ):
+        original = copy.deepcopy(credential)
+        refresh_token = session.get("refresh_token", "")
+        client_id = session.get("oidc_client_id", "")
+        if not isinstance(refresh_token, str) or not refresh_token:
+            raise RuntimeError("credential expired and no refresh token is available; log in again")
+        if not isinstance(client_id, str) or not client_id:
+            raise RuntimeError("credential expired and no refresh token is available; log in again")
+        refreshed = _refresh_token(_XAI_TOKEN_URL, client_id, refresh_token, timeout)
+        session["key"] = refreshed["access_token"]
+        if isinstance(refreshed.get("refresh_token"), str) and refreshed["refresh_token"]:
+            session["refresh_token"] = refreshed["refresh_token"]
+        expires_in = float(refreshed.get("expires_in", 0) or 0)
+        if expires_in > 0:
+            session["expires_at"] = (
+                datetime.fromtimestamp(datetime.now(UTC).timestamp() + expires_in, UTC)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
+        _write_json_atomic(path, credential, expected=original)
+        token = str(session["key"])
+    return token
+
+
+def _fetch_xai(timeout: float) -> dict:
+    try:
+        path = _grok_credentials_path()
+        raw_credential = _read_json(path)
+        token = _grok_access_token(path, raw_credential, timeout)
+        usage = _request_json_retry_unauthorized(
+            _XAI_USAGE_URL,
+            token,
+            timeout,
+            lambda: _grok_access_token(path, raw_credential, timeout, force_refresh=True),
+        )
+        limits = _grok_limits(usage)
+        if not limits:
+            raise RuntimeError("xai usage response has no recognized windows")
+        email = _grok_session(raw_credential).get("email", "")
+        return {"accounts": [_account(email if isinstance(email, str) else "", limits)]}
+    except (RuntimeError, TypeError, ValueError) as exc:
+        log.warning("xAI usage fetch failed: %s", exc)
+        return _provider_error(str(exc))
+
+
 _AUTH_ERROR_MARKERS = (
     "auth denied",
     "auth missing",
@@ -988,11 +1088,7 @@ def render_widget(
     bbox = draw.textbbox((0, 0), label, font=font)
     label_h = bbox[3] - bbox[1]
     icon_center = padding + icon.height // 2 if icon is not None else None
-    label_y = (
-        icon_center - label_h // 2 - bbox[1]
-        if icon_center is not None
-        else padding - 4
-    )
+    label_y = icon_center - label_h // 2 - bbox[1] if icon_center is not None else padding - 4
     draw.text((padding, label_y), label, font=font, fill=(255, 255, 255))
 
     if icon is not None:

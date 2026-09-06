@@ -180,15 +180,15 @@ mode = "time-weekday"
 # ...
 
 # ----------------------------------------------------------------------- usage page
-# A page that shows remaining Claude/Codex/OpenCode Go usage and the Moonshot
+# A page that shows remaining Claude/Codex/OpenCode Go/xAI usage and the Moonshot
 # (Kimi API) account balance on LCD buttons. Uses credentials maintained by
-# `claude /login`, `codex login`, and OpenCode `/connect`. Provider data is
+# `claude /login`, `codex login`, `grok login`, and OpenCode `/connect`. Provider data is
 # fetched directly and refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
 # Pressing a usage button requests a refresh (throttled to once every 90 seconds)
 # and opens the provider's usage page in the browser
-# (defaults: claude.ai, chatgpt.com, opencode.ai/go, platform.kimi.com);
+# (defaults: claude.ai, chatgpt.com, opencode.ai/go, grok.com, platform.kimi.com);
 # set `url` on a widget to override it.
 #
 # [[page]]
@@ -272,6 +272,14 @@ mode = "time-weekday"
 # label = "BAL"
 # icon = "moonshot"
 # url = "https://platform.kimi.com/console/account"  # override the press URL
+#
+# [[page.widget]]
+# pos = 9
+# provider = "xai"
+# account = ""
+# limit = "weekly"
+# label = "7D"
+# icon = "xai"
 #
 # [[page.button]]
 # pos = 14

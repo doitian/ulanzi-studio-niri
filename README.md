@@ -16,8 +16,8 @@ Buttons can:
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
 
-LCD buttons can show remaining Claude, Codex, and OpenCode Go plan usage, plus
-the Moonshot (Kimi API) account balance. The daemon reads credentials
+LCD buttons can show remaining Claude, Codex, OpenCode Go, and xAI (Grok) plan
+usage, plus the Moonshot (Kimi API) account balance. The daemon reads credentials
 maintained by `claude /login`, `codex login`, and OpenCode `/connect`, then
 fetches usage directly from each provider. Configure one `[[page.widget]]` per
 provider/window; each renders on the button at its `pos`:
@@ -46,6 +46,19 @@ Its API key is read from the `opencode-go` entry in
 `$XDG_DATA_HOME/opencode/auth.json` (normally
 `~/.local/share/opencode/auth.json`). Set `OPENCODE_GO_API_KEY` to override it.
 
+xAI (Grok) reports SuperGrok remaining weekly allowance from `grok login`
+credentials in `~/.grok/auth.json` (override with `GROK_HOME` or
+`ULANZI_GROK_CREDENTIALS`):
+
+```toml
+[[page.widget]]
+pos = 4
+provider = "xai"
+limit = "weekly"           # weekly only
+label = "7D"
+icon = "xai"
+```
+
 Moonshot's Kimi API is pay-as-you-go, so its widget shows the remaining
 account balance instead of a percentage, colored green / yellow / red as it
 drops below ¥70 / ¥36 (CNY) or $12 / $6 (USD):
@@ -68,7 +81,8 @@ platforms respectively.
 Pressing a usage button requests a refresh and opens the provider's usage page in the browser.
 Defaults: `https://claude.ai/new#settings/usage` (Claude),
 `https://chatgpt.com/#settings/Usage` (Codex), `https://opencode.ai/go`
-(OpenCode Go), `https://platform.kimi.com/console/account` (Moonshot). Set
+(OpenCode Go), `https://grok.com/?_s=usage` (xAI),
+`https://platform.kimi.com/console/account` (Moonshot). Set
 `url` on a widget to override:
 
 ```toml
