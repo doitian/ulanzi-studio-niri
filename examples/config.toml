@@ -195,8 +195,14 @@ mode = "time-weekday"
 # name = "usage"
 # layer = "home"
 #
-# [[page.widget]]
+# [[page.button]]
 # pos = 0
+# label = "AI Limits"
+# icon = "ai-usage"
+# # Placeholder: no button actions.
+#
+# [[page.widget]]
+# pos = 3
 # provider = "claude"
 # account = ""
 # limit = "seven_day_fable"
@@ -220,7 +226,7 @@ mode = "time-weekday"
 # icon = "claude-desktop"
 #
 # [[page.widget]]
-# pos = 3
+# pos = 5
 # provider = "codex"
 # account = ""
 # limit = "five_hour"
@@ -228,7 +234,7 @@ mode = "time-weekday"
 # icon = "chatgpt"
 #
 # [[page.widget]]
-# pos = 4
+# pos = 6
 # provider = "codex"
 # account = ""
 # limit = "seven_day"
@@ -236,7 +242,7 @@ mode = "time-weekday"
 # icon = "chatgpt"
 #
 # [[page.widget]]
-# pos = 5
+# pos = 7
 # provider = "opencode-go"
 # account = ""
 # limit = "rolling"
@@ -244,7 +250,7 @@ mode = "time-weekday"
 # icon = "opencode"
 #
 # [[page.widget]]
-# pos = 6
+# pos = 8
 # provider = "opencode-go"
 # account = ""
 # limit = "weekly"
@@ -252,11 +258,11 @@ mode = "time-weekday"
 # icon = "opencode"
 #
 # [[page.widget]]
-# pos = 7
+# pos = 9
 # provider = "opencode-go"
 # account = ""
 # limit = "monthly"
-# label = "1M"
+# label = "30D"
 # icon = "opencode"
 #
 # Moonshot (Kimi API) is pay-as-you-go, so it shows the remaining balance
@@ -265,7 +271,7 @@ mode = "time-weekday"
 # OpenCode's auth.json; moonshotai-cn targets the China platform (CNY).
 #
 # [[page.widget]]
-# pos = 8
+# pos = 4
 # provider = "moonshot"
 # account = ""
 # limit = "balance"
@@ -274,7 +280,7 @@ mode = "time-weekday"
 # url = "https://platform.kimi.com/console/account"  # override the press URL
 #
 # [[page.widget]]
-# pos = 9
+# pos = 10
 # provider = "xai"
 # account = ""
 # limit = "weekly"

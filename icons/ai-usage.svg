@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>AI usage limits</title>
+  <path d="M22 88a48 48 0 1 1 84 0" stroke="currentColor" stroke-width="8" stroke-linecap="round"/>
+  <path d="M28 64h8m6-29 5 7m17-17v9m22 1-5 7m19 22h-8" stroke="currentColor" stroke-width="5" stroke-linecap="round"/>
+  <path d="m64 72 18-19" stroke="#70D7CC" stroke-width="7" stroke-linecap="round"/>
+  <circle cx="64" cy="72" r="7" fill="#70D7CC"/>
+  <path d="m43 108 9-22 9 22m-14-8h10m16-14v22m-5-22h10m-10 22h10" stroke="currentColor" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
