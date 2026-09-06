@@ -94,3 +94,31 @@ async def test_following_click_runs_while_widget_fetch_and_browser_are_pending(m
         await asyncio.gather(*app._widget_tasks)
         if app._usage._task is not None:
             await app._usage._task
+
+
+async def test_page_indicator_tracks_navigation_within_current_layer(monkeypatch):
+    cfg = Config(
+        page=[
+            PageConfig(name="first", layer="home"),
+            PageConfig(name="folder", layer="folder"),
+            PageConfig(name="second", layer="home"),
+        ]
+    )
+    monkeypatch.setattr(service, "load_config", lambda _: cfg)
+    background = Mock(return_value=b"background")
+    monkeypatch.setattr(service, "render_background", background)
+    build_zip = Mock(return_value=b"zip")
+    monkeypatch.setattr(service, "build_buttons_zip", build_zip)
+    app = service.Service("unused.toml")
+    app._device = Mock(push_buttons_zip=AsyncMock())
+    monkeypatch.setattr(app, "_start_wide_tile_worker", Mock())
+
+    await app._render_current_page()
+    assert background.call_args.args[1:] == (0, 2)
+    await app.cycle_page(1)
+    assert background.call_args.args[1:] == (1, 2)
+    await app.switch_page("folder")
+    assert background.call_args.args[1:] == (0, 1)
+    await app.page_back()
+    assert background.call_args.args[1:] == (1, 2)
+    assert build_zip.call_args.kwargs["wide_tile_image"] == b"background"

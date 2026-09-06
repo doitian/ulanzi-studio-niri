@@ -27,7 +27,7 @@ from .protocol.ulanzi_d200x import (
     UlanziD200XDevice,
 )
 from .stats import prime_cpu_sampler
-from .wide_tile import WideTileState, WideTileWorker
+from .wide_tile import WideTileState, WideTileWorker, render_background
 from .zip_builder import build_buttons_zip
 
 log = logging.getLogger(__name__)
@@ -149,11 +149,19 @@ class Service:
         page = self._pages.current
         wt_mode = page.wide_tile.mode if page.wide_tile is not None else "clock"
         widget_images = await self._render_widget_images(page)
+        peers = self._cfg.pages_in_layer(page.layer)
+        wide_tile_image = await asyncio.to_thread(
+            render_background,
+            page.wide_tile or WideTileEntry(),
+            next(i for i, peer in enumerate(peers) if peer.name == page.name),
+            len(peers),
+        )
         blob = build_buttons_zip(
             page.button,
             self._cfg.label,
             wide_tile_mode=wt_mode,
             widget_images=widget_images,
+            wide_tile_image=wide_tile_image,
         )
         await self._device.push_buttons_zip(blob)
         log.info("pushed page %r (%d buttons)", page.name, len(page.button))
@@ -357,10 +365,8 @@ class Service:
                     config=new,
                 )
             )
-        # Repush the manifest when leaving "background" mode so the leftover
-        # wide-tile background image gets overwritten with our solid-black
-        # placeholder. Going *into* background mode also repushes, so we drop
-        # the placeholder and let the firmware's stored bg show through.
+        # Repush when entering or leaving background mode to update the image
+        # beneath the page indicator and firmware content.
         if prev_mode != mode and (prev_mode == "background" or mode == "background"):
             await self._render_current_page()
 
