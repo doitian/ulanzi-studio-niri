@@ -16,14 +16,18 @@ pipe-delimited payload ``mode|cpu|mem|time|gpu|format|suffix``. Mode integers
 from __future__ import annotations
 
 import asyncio
+import io
 import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
+from pathlib import Path
+
+from PIL import Image, ImageDraw, ImageOps
 
 from .ai_usage import USAGE_REFRESH_SECONDS
 from .config import UsageWidget, WideTileEntry
-from .protocol.ulanzi_d200x import SmallWindowMode, UlanziD200XDevice
+from .protocol.ulanzi_d200x import WIDE_TILE_GEOMETRY, SmallWindowMode, UlanziD200XDevice
 from .stats import StatsSnapshot, prime_cpu_sampler
 
 log = logging.getLogger(__name__)
@@ -41,6 +45,27 @@ _CLOCK_MODES: dict[str, SmallWindowMode] = {
 class WideTileState:
     config: WideTileEntry
     widgets: list[UsageWidget] = field(default_factory=list)
+
+
+def render_background(config: WideTileEntry, page_index: int, page_count: int) -> bytes:
+    """Render the background beneath firmware content and the layer's page position."""
+    size = (WIDE_TILE_GEOMETRY.width, WIDE_TILE_GEOMETRY.height)
+    image = Image.new("RGB", size, "black")
+    if config.mode == "background" and config.image:
+        with Image.open(Path(config.image).expanduser()) as source:
+            image = ImageOps.fit(source.convert("RGB"), size)
+    if page_count > 1:
+        left = 12
+        width, height = size[0] - 2 * left, 12
+        top = size[1] - height - 4
+        draw = ImageDraw.Draw(image)
+        draw.rectangle((left, top, left + width - 1, top + height - 1), fill="#707070")
+        start = left + page_index * width // page_count
+        end = left + (page_index + 1) * width // page_count
+        draw.rectangle((start, top, max(start, end - 1), top + height - 1), fill="#9974F8")
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    return output.getvalue()
 
 
 def build_clock_payload(mode: SmallWindowMode, time_format: str = "%H:%M:%S") -> str:
@@ -126,7 +151,9 @@ class WideTileWorker:
     async def _tick(self) -> None:
         cfg = self._state.config
         if cfg.mode in _CLOCK_MODES:
-            await self._device.set_small_window(build_clock_payload(_CLOCK_MODES[cfg.mode], cfg.format))
+            await self._device.set_small_window(
+                build_clock_payload(_CLOCK_MODES[cfg.mode], cfg.format)
+            )
         elif cfg.mode == "stats":
             await self._device.set_small_window(build_stats_payload(StatsSnapshot.sample()))
         elif cfg.mode == "background":
