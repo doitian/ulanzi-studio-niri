@@ -116,6 +116,22 @@ PROVIDERS = {
             }
         ]
     },
+    "xai": {
+        "accounts": [
+            {
+                "email": "grok@example.com",
+                "active": True,
+                "limits": {
+                    "weekly": {
+                        "used_percent": 24,
+                        "remaining_percent": 76,
+                        "resets_at": "2026-09-13T00:00:00+00:00",
+                        "reset_after_seconds": 500000,
+                    },
+                },
+            }
+        ]
+    },
 }
 
 
@@ -163,6 +179,7 @@ def test_default_labels() -> None:
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="weekly")) == "7D"
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="monthly")) == "30D"
     assert _default_label(UsageWidget(pos=1, provider="moonshot", limit="balance")) == "BAL"
+    assert _default_label(UsageWidget(pos=1, provider="xai", limit="weekly")) == "7D"
 
 
 def test_resolve_limit_missing() -> None:
@@ -390,6 +407,7 @@ async def test_fetch_usage_combines_providers(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_codex", lambda _timeout: PROVIDERS["codex"])
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
+    monkeypatch.setattr(ai_usage, "_fetch_xai", lambda _timeout: PROVIDERS["xai"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.OK
     assert result.data == {"providers": PROVIDERS}
@@ -405,6 +423,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_codex", lambda _timeout: error)
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
+    monkeypatch.setattr(ai_usage, "_fetch_xai", lambda _timeout: PROVIDERS["xai"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.ERROR
     assert result.data == {
@@ -413,6 +432,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
             "codex": error,
             "opencode-go": PROVIDERS["opencode-go"],
             "moonshot": PROVIDERS["moonshot"],
+            "xai": PROVIDERS["xai"],
         }
     }
 
@@ -672,6 +692,106 @@ def test_claude_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     assert written == [credential]
 
 
+def test_grok_limits_missing_percent_is_unused() -> None:
+    limits = ai_usage._grok_limits(
+        {
+            "config": {
+                "currentPeriod": {"type": "USAGE_PERIOD_TYPE_WEEKLY", "end": "2030-03-18T12:00:00Z"}
+            }
+        }
+    )
+    assert limits["weekly"]["remaining_percent"] == 100
+
+
+def test_grok_limits_empty() -> None:
+    assert ai_usage._grok_limits({"config": {}}) == {}
+
+
+def test_grok_credentials_path(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_GROK_CREDENTIALS", str(tmp_path / "custom.json"))
+    assert ai_usage._grok_credentials_path() == tmp_path / "custom.json"
+    monkeypatch.delenv("ULANZI_GROK_CREDENTIALS")
+    monkeypatch.setenv("GROK_HOME", str(tmp_path / "grok-home"))
+    assert ai_usage._grok_credentials_path() == tmp_path / "grok-home" / "auth.json"
+
+
+def test_grok_access_token_refreshes_expired(monkeypatch, tmp_path) -> None:
+    credential = {
+        "https://auth.x.ai::client": {
+            "key": "old-access",
+            "refresh_token": "old-refresh",
+            "oidc_client_id": "grok-client",
+            "email": "grok@example.com",
+            "expires_at": "2000-01-01T00:00:00Z",
+        },
+        "extra": {"keep": True},
+    }
+    written = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_refresh_token",
+        lambda *_args: {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        },
+    )
+    monkeypatch.setattr(
+        ai_usage,
+        "_write_json_atomic",
+        lambda _path, value, **_kwargs: written.append(value),
+    )
+
+    token = ai_usage._grok_access_token(tmp_path / "auth.json", credential, 5)
+
+    assert token == "new-access"
+    assert credential["https://auth.x.ai::client"]["refresh_token"] == "new-refresh"
+    assert credential["extra"] == {"keep": True}
+    assert written == [credential]
+
+
+def test_fetch_xai(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "auth.json"
+    path.write_text(
+        json.dumps(
+            {
+                "https://auth.x.ai::client": {
+                    "key": "grok-access",
+                    "refresh_token": "grok-refresh",
+                    "oidc_client_id": "grok-client",
+                    "email": "grok@example.com",
+                    "expires_at": "2099-01-01T00:00:00Z",
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("ULANZI_GROK_CREDENTIALS", str(path))
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json_retry_unauthorized",
+        lambda *_args, **_kwargs: {
+            "config": {
+                "creditUsagePercent": 24,
+                "currentPeriod": {
+                    "type": "USAGE_PERIOD_TYPE_WEEKLY",
+                    "end": "2030-03-18T12:00:00Z",
+                },
+            }
+        },
+    )
+
+    provider = ai_usage._fetch_xai(5)
+
+    assert provider["accounts"][0]["email"] == "grok@example.com"
+    assert provider["accounts"][0]["limits"]["weekly"]["remaining_percent"] == 76
+
+
+def test_fetch_xai_missing_credentials(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_GROK_CREDENTIALS", str(tmp_path / "missing.json"))
+    provider = ai_usage._fetch_xai(5)
+    assert "error" in provider
+
+
 def test_codex_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     payload = base64.urlsafe_b64encode(b'{"exp":1}').rstrip(b"=").decode()
     credential = {
@@ -781,6 +901,7 @@ async def test_fetch_usage_timeout(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_codex", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", timed_out)
+    monkeypatch.setattr(ai_usage, "_fetch_xai", timed_out)
     result = await ai_usage.fetch_usage(timeout=0.1)
     assert result.status is FetchStatus.TIMEOUT
     assert result.data is None

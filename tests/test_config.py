@@ -395,6 +395,7 @@ def test_refresh_action_is_rejected() -> None:
         """
         )
 
+
 def test_widget_xai_weekly_parses() -> None:
     cfg = _load(
         """
