@@ -75,6 +75,7 @@ def build_buttons_zip(
     workdir: Path | None = None,
     wide_tile_mode: str | None = None,
     widget_images: dict[int, bytes] | None = None,
+    wide_tile_image: bytes | None = None,
 ) -> bytes:
     """Build the buttons ZIP blob; safe for the firmware's packet alignment.
 
@@ -86,6 +87,9 @@ def build_buttons_zip(
     ``widget_images`` maps button positions to pre-rendered PNG bytes (e.g.
     usage widgets); those positions get the supplied image instead of the
     label/icon render.
+
+    ``wide_tile_image`` supplies the wide-tile background, including any page
+    indicator, beneath the firmware's clock or stats overlay.
     """
     workdir = workdir or Path(tempfile.mkdtemp(prefix="ulanzi-build-"))
     page_dir = workdir / "page"
@@ -111,9 +115,7 @@ def build_buttons_zip(
             # Note: we do not emit "Text" here. Our PIL renderer bakes the
             # label into the PNG; the firmware's label-style overlay would
             # otherwise draw a second copy on top of ours.
-            req = request_from_button(
-                button.label, button.icon, geom.width, geom.height, label_cfg
-            )
+            req = request_from_button(button.label, button.icon, geom.width, geom.height, label_cfg)
             cached = render_cached(req)
             arc_name = f"{cached.name}"
             target = icons_dir / arc_name
@@ -125,7 +127,16 @@ def build_buttons_zip(
             "ViewParam": [view],
         }
 
-    if wide_tile_mode is not None and wide_tile_mode != "background":
+    if wide_tile_image is not None:
+        digest = hashlib.sha256(wide_tile_image).hexdigest()[:12]
+        arc_name = f"wide-{digest}.png"
+        (icons_dir / arc_name).write_bytes(wide_tile_image)
+        wgeom = WIDE_TILE_GEOMETRY
+        manifest[f"{wgeom.col}_{wgeom.row}"] = {
+            "State": 0,
+            "ViewParam": [{"Icon": f"icons/{arc_name}"}],
+        }
+    elif wide_tile_mode is not None and wide_tile_mode != "background":
         wgeom = WIDE_TILE_GEOMETRY
         key = f"{wgeom.col}_{wgeom.row}"
         req = RenderRequest(

@@ -39,3 +39,15 @@ def test_widget_icon_path_changes_with_content() -> None:
             return path
 
     assert icon_path(first) != icon_path(second)
+
+
+def test_wide_tile_image_is_packaged_with_content_specific_path() -> None:
+    paths = []
+    for content in (b"first page", b"second page"):
+        blob = build_buttons_zip([], LabelConfig(), wide_tile_image=content)
+        with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+            manifest = json.loads(archive.read("manifest.json"))
+            path = manifest["3_2"]["ViewParam"][0]["Icon"]
+            assert archive.read(path) == content
+            paths.append(path)
+    assert paths[0] != paths[1]
