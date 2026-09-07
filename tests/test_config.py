@@ -424,3 +424,50 @@ def test_widget_xai_rejects_other_limits() -> None:
             limit = "five_hour"
             """
         )
+
+
+def test_encoder_press_rotate_actions_parse() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.encoder]]
+        index = 0
+        on_press_rotate_cw = { type = "media", cmd = "next" }
+        on_press_rotate_ccw = { type = "media", cmd = "prev" }
+        """
+    )
+    enc = cfg.page[0].encoder[0]
+    assert enc.on_press_rotate_cw is not None
+    assert enc.on_press_rotate_cw.cmd == "next"
+    assert enc.on_press_rotate_ccw is not None
+    assert enc.on_press_rotate_ccw.cmd == "prev"
+
+
+def test_encoder_without_press_rotate_defaults_unset() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.encoder]]
+        index = 0
+        on_press = { type = "media", cmd = "mute" }
+        on_rotate_cw = { type = "media", cmd = "vol-up" }
+        """
+    )
+    enc = cfg.page[0].encoder[0]
+    assert enc.on_press_rotate_cw is None
+    assert enc.on_press_rotate_ccw is None
+
+
+def test_encoder_unknown_key_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.encoder]]
+            index = 0
+            on_spin = { type = "media", cmd = "mute" }
+            """
+        )
