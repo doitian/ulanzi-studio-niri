@@ -181,8 +181,8 @@ async def test_encoder_hold_rotate_bound_cancels_click(monkeypatch):
 
     await app._on_encoder_press(_press(0, True))
     app._on_encoder_rotate(_rotate(0, 1, held=True))
-    await _drain_encoders(app)
     await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
 
     dispatch.assert_awaited_once()
     assert dispatch.call_args.args[0] is nxt
@@ -199,8 +199,8 @@ async def test_encoder_hold_rotate_falls_through_and_cancels_click(monkeypatch):
 
     await app._on_encoder_press(_press(0, True))
     app._on_encoder_rotate(_rotate(0, 1, held=True))
-    await _drain_encoders(app)
     await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
 
     dispatch.assert_awaited_once()
     assert dispatch.call_args.args[0] is vol
@@ -222,8 +222,8 @@ async def test_encoder_hold_rotate_noop_does_not_fall_through(monkeypatch):
 
     await app._on_encoder_press(_press(0, True))
     app._on_encoder_rotate(_rotate(0, 1, held=True))
-    await _drain_encoders(app)
     await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
 
     dispatch.assert_awaited_once()
     assert isinstance(dispatch.call_args.args[0], NoopAction)
@@ -251,6 +251,7 @@ async def test_encoder_click_on_release_without_press_rotate_keys(monkeypatch):
     app, dispatch = _encoder_service(monkeypatch, EncoderEntry(index=0, on_press=mute))
 
     await app._on_encoder_press(_press(0, True))
+    dispatch.assert_not_awaited()
     await app._on_encoder_press(_press(0, False))
     dispatch.assert_awaited_once()
 
@@ -286,9 +287,9 @@ async def test_encoder_hold_on_one_does_not_cancel_click_on_another(monkeypatch)
     await app._on_encoder_press(_press(0, True))
     await app._on_encoder_press(_press(1, True))
     app._on_encoder_rotate(_rotate(0, 1, held=True))
-    await _drain_encoders(app)
     await app._on_encoder_press(_press(0, False))
     await app._on_encoder_press(_press(1, False))
+    await _drain_encoders(app)
 
     actions = [c.args[0] for c in dispatch.call_args_list]
     assert nxt in actions
@@ -310,6 +311,33 @@ async def test_encoder_hold_and_free_pulses_use_separate_buckets(monkeypatch):
 
     actions = [c.args[0] for c in dispatch.call_args_list]
     assert actions == [vol, nxt]
+
+
+async def test_encoder_hold_rotate_cancels_click_without_rotate_action(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    app, dispatch = _encoder_service(monkeypatch, EncoderEntry(index=0, on_press=mute))
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
+
+    dispatch.assert_not_awaited()
+
+
+async def test_encoder_coalesce_repeats_hold_rotate_action(monkeypatch):
+    nxt = MediaAction(type="media", cmd="next")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press_rotate_cw=nxt),
+    )
+
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await _drain_encoders(app)
+
+    assert dispatch.await_count == 2
+    assert all(c.args[0] is nxt for c in dispatch.call_args_list)
 
 
 async def test_encoder_missing_mapping_is_noop(monkeypatch):
