@@ -163,6 +163,8 @@ class EncoderEntry(BaseModel):
     on_press: Action | None = None
     on_rotate_cw: Action | None = None
     on_rotate_ccw: Action | None = None
+    on_press_rotate_cw: Action | None = None
+    on_press_rotate_ccw: Action | None = None
 
     @field_validator("index")
     @classmethod

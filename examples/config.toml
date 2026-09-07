@@ -7,6 +7,9 @@
 #   pos 10..12  row 2 LCD (3 buttons; pos 13 is the wide tile)
 #   pos 14..15  plain hardware buttons (left, right of LCDs)
 # Encoders are configured separately via [[page.encoder]] with index 0..2.
+# Click fires on release and is cancelled if the knob turned while held.
+# Unset on_press_rotate_* keys fall through to on_rotate_*.
+# Use { type = "noop" } on a press-rotate key to silence that direction.
 
 [device]
 brightness = 70
@@ -126,6 +129,8 @@ label = "Vol"
 on_press = { type = "media", cmd = "mute" }
 on_rotate_cw = { type = "media", cmd = "vol-up", step = 2 }
 on_rotate_ccw = { type = "media", cmd = "vol-down", step = 2 }
+on_press_rotate_cw = { type = "media", cmd = "next" }
+on_press_rotate_ccw = { type = "media", cmd = "prev" }
 
 [[page.encoder]]
 index = 1

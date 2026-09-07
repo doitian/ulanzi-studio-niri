@@ -9,6 +9,10 @@ from ulanzi_niri.config import (
     BrightnessAction,
     ButtonEntry,
     Config,
+    DeviceConfig,
+    EncoderEntry,
+    MediaAction,
+    NoopAction,
     PageConfig,
     UsageWidget,
 )
@@ -122,3 +126,243 @@ async def test_page_indicator_tracks_navigation_within_current_layer(monkeypatch
     await app.page_back()
     assert background.call_args.args[1:] == (1, 2)
     assert build_zip.call_args.kwargs["wide_tile_image"] == b"background"
+
+
+def _encoder_service(monkeypatch, *encoders: EncoderEntry, pages: list[PageConfig] | None = None):
+    if pages is None:
+        pages = [PageConfig(name="main", encoder=list(encoders))]
+    cfg = Config(device=DeviceConfig(encoder_coalesce_ms=0), page=pages)
+    monkeypatch.setattr(service, "load_config", lambda _: cfg)
+    app = service.Service("unused.toml")
+    dispatch = AsyncMock()
+    monkeypatch.setattr(service, "dispatch", dispatch)
+    return app, dispatch
+
+
+async def _drain_encoders(app: service.Service) -> None:
+    tasks = [t for t in app._encoder_flush_task.values() if not t.done()]
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
+def _press(idx: int, pressed: bool) -> DeckEvent:
+    return DeckEvent(kind=DeckEventKind.ENCODER_PRESS, encoder_index=idx, pressed=pressed)
+
+
+def _rotate(idx: int, delta: int, *, held: bool = False) -> DeckEvent:
+    return DeckEvent(
+        kind=DeckEventKind.ENCODER_ROTATE,
+        encoder_index=idx,
+        delta=delta,
+        pressed=held,
+    )
+
+
+async def test_encoder_click_fires_on_release_not_press(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    app, dispatch = _encoder_service(monkeypatch, EncoderEntry(index=0, on_press=mute))
+
+    await app._on_encoder_press(_press(0, True))
+    dispatch.assert_not_awaited()
+
+    await app._on_encoder_press(_press(0, False))
+    dispatch.assert_awaited_once()
+    assert dispatch.call_args.args[0] is mute
+    assert dispatch.call_args.args[1].source == "encoder:0:press"
+
+
+async def test_encoder_hold_rotate_bound_cancels_click(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    nxt = MediaAction(type="media", cmd="next")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press=mute, on_press_rotate_cw=nxt),
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
+
+    dispatch.assert_awaited_once()
+    assert dispatch.call_args.args[0] is nxt
+    assert dispatch.call_args.args[1].source == "encoder:0:press_cw"
+
+
+async def test_encoder_hold_rotate_falls_through_and_cancels_click(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    vol = MediaAction(type="media", cmd="vol-up")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press=mute, on_rotate_cw=vol),
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
+
+    dispatch.assert_awaited_once()
+    assert dispatch.call_args.args[0] is vol
+    assert dispatch.call_args.args[1].source == "encoder:0:press_cw"
+
+
+async def test_encoder_hold_rotate_noop_does_not_fall_through(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    vol = MediaAction(type="media", cmd="vol-up")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(
+            index=0,
+            on_press=mute,
+            on_rotate_cw=vol,
+            on_press_rotate_cw=NoopAction(type="noop"),
+        ),
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
+
+    dispatch.assert_awaited_once()
+    assert isinstance(dispatch.call_args.args[0], NoopAction)
+
+
+async def test_encoder_hold_rotate_unmapped_direction_falls_through(monkeypatch):
+    nxt = MediaAction(type="media", cmd="next")
+    vol_down = MediaAction(type="media", cmd="vol-down")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press_rotate_cw=nxt, on_rotate_ccw=vol_down),
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, -1, held=True))
+    await _drain_encoders(app)
+
+    dispatch.assert_awaited_once()
+    assert dispatch.call_args.args[0] is vol_down
+    assert dispatch.call_args.args[1].source == "encoder:0:press_ccw"
+
+
+async def test_encoder_click_on_release_without_press_rotate_keys(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    app, dispatch = _encoder_service(monkeypatch, EncoderEntry(index=0, on_press=mute))
+
+    await app._on_encoder_press(_press(0, True))
+    dispatch.assert_not_awaited()
+    await app._on_encoder_press(_press(0, False))
+    dispatch.assert_awaited_once()
+
+
+async def test_encoder_free_rotate_does_not_cancel_later_click(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    vol = MediaAction(type="media", cmd="vol-up")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press=mute, on_rotate_cw=vol),
+    )
+
+    app._on_encoder_rotate(_rotate(0, 1, held=False))
+    await _drain_encoders(app)
+    await app._on_encoder_press(_press(0, True))
+    await app._on_encoder_press(_press(0, False))
+
+    assert dispatch.await_count == 2
+    assert dispatch.call_args_list[0].args[0] is vol
+    assert dispatch.call_args_list[1].args[0] is mute
+
+
+async def test_encoder_hold_on_one_does_not_cancel_click_on_another(monkeypatch):
+    mute0 = MediaAction(type="media", cmd="mute")
+    nxt = MediaAction(type="media", cmd="next")
+    mute1 = MediaAction(type="media", cmd="play-pause")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press=mute0, on_press_rotate_cw=nxt),
+        EncoderEntry(index=1, on_press=mute1),
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    await app._on_encoder_press(_press(1, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await app._on_encoder_press(_press(1, False))
+    await _drain_encoders(app)
+
+    actions = [c.args[0] for c in dispatch.call_args_list]
+    assert nxt in actions
+    assert mute1 in actions
+    assert mute0 not in actions
+
+
+async def test_encoder_hold_and_free_pulses_use_separate_buckets(monkeypatch):
+    nxt = MediaAction(type="media", cmd="next")
+    vol = MediaAction(type="media", cmd="vol-up")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press_rotate_cw=nxt, on_rotate_cw=vol),
+    )
+
+    app._on_encoder_rotate(_rotate(0, 1, held=False))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await _drain_encoders(app)
+
+    actions = [c.args[0] for c in dispatch.call_args_list]
+    assert actions == [vol, nxt]
+
+
+async def test_encoder_hold_rotate_cancels_click_without_rotate_action(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    app, dispatch = _encoder_service(monkeypatch, EncoderEntry(index=0, on_press=mute))
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await app._on_encoder_press(_press(0, False))
+    await _drain_encoders(app)
+
+    dispatch.assert_not_awaited()
+
+
+async def test_encoder_coalesce_repeats_hold_rotate_action(monkeypatch):
+    nxt = MediaAction(type="media", cmd="next")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        EncoderEntry(index=0, on_press_rotate_cw=nxt),
+    )
+
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await _drain_encoders(app)
+
+    assert dispatch.await_count == 2
+    assert all(c.args[0] is nxt for c in dispatch.call_args_list)
+
+
+async def test_encoder_missing_mapping_is_noop(monkeypatch):
+    app, dispatch = _encoder_service(monkeypatch)
+
+    await app._on_encoder_press(_press(0, True))
+    app._on_encoder_rotate(_rotate(0, 1, held=True))
+    await _drain_encoders(app)
+    await app._on_encoder_press(_press(0, False))
+
+    dispatch.assert_not_awaited()
+
+
+async def test_encoder_page_switch_swallows_in_flight_click(monkeypatch):
+    mute = MediaAction(type="media", cmd="mute")
+    app, dispatch = _encoder_service(
+        monkeypatch,
+        pages=[
+            PageConfig(name="main", encoder=[EncoderEntry(index=0, on_press=mute)]),
+            PageConfig(name="apps"),
+        ],
+    )
+
+    await app._on_encoder_press(_press(0, True))
+    app._pages.switch("apps")
+    await app._on_encoder_press(_press(0, False))
+
+    dispatch.assert_not_awaited()

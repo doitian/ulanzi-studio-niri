@@ -117,7 +117,13 @@ ulanzi-niri ai-usage
 - 1 wide LCD button at 458×196 (bottom-right; driven by the small-window
   subsystem)
 - 2 plain physical buttons
-- 3 rotary encoders (each with click)
+- 3 rotary encoders (each with click, free rotate, and press-rotate)
+
+Each `[[page.encoder]]` can bind `on_press`, `on_rotate_cw` / `on_rotate_ccw`,
+and `on_press_rotate_cw` / `on_press_rotate_ccw`. Click fires on release and is
+cancelled if the knob turned while held. Unset press-rotate keys fall through
+to the free-rotate actions. An explicit `{ type = "noop" }` press-rotate
+binding silences that direction instead.
 
 ## Installation
 
@@ -206,7 +212,7 @@ uv run ruff check .             # lint
 
 All physical inputs are wired: the 13 LCD buttons, the wide tile (pos 13),
 the two plain hardware buttons (pos 14, 15), and all three rotary encoders
-(press + rotate). Streaming for the 4th-row buttons and encoders requires a
+(press, rotate, and press-rotate). Streaming for the 4th-row buttons and encoders requires a
 one-time `ENABLE_INPUT_STREAMING` (cmd 0x0002) packet on connect, which the
 daemon sends automatically; without it the firmware silently consumes
 encoder rotates (routing them to its built-in brightness handler). Opcode

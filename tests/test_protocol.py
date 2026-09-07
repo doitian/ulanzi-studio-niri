@@ -108,11 +108,34 @@ def test_parse_encoder_rotate() -> None:
     assert ccw.kind == DeckEventKind.ENCODER_ROTATE
     assert ccw.encoder_index == 0
     assert ccw.delta == -1
+    assert ccw.pressed is False
 
     [cw] = dev._parse_input(_button_packet(0x01, 0x13, 0x02, 0x03))
     assert cw.kind == DeckEventKind.ENCODER_ROTATE
     assert cw.encoder_index == 2
     assert cw.delta == 1
+    assert cw.pressed is False
+
+
+def test_parse_encoder_hold_rotate() -> None:
+    dev = _device()
+    [cw] = dev._parse_input(_button_packet(0x01, 0x11, 0x02, 0x05))
+    assert cw.kind == DeckEventKind.ENCODER_ROTATE
+    assert cw.encoder_index == 0
+    assert cw.delta == 1
+    assert cw.pressed is True
+
+    [ccw] = dev._parse_input(_button_packet(0x01, 0x13, 0x02, 0x04))
+    assert ccw.kind == DeckEventKind.ENCODER_ROTATE
+    assert ccw.encoder_index == 2
+    assert ccw.delta == -1
+    assert ccw.pressed is True
+
+
+def test_parse_unknown_encoder_value_falls_back() -> None:
+    dev = _device()
+    [evt] = dev._parse_input(_button_packet(0x01, 0x11, 0x02, 0x06))
+    assert evt.kind == DeckEventKind.UNKNOWN
 
 
 def test_parse_unknown_marker_falls_back() -> None:

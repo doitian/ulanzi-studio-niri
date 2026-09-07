@@ -40,6 +40,11 @@ class _PressState:
     long_press_task: asyncio.Task | None = None
 
 
+@dataclass
+class _EncoderClickState:
+    rotated_while_held: bool = False
+
+
 class Service:
     def __init__(self, config_path: Path) -> None:
         self._config_path = config_path
@@ -49,8 +54,9 @@ class Service:
         self._wide: WideTileWorker | None = None
         self._stop = asyncio.Event()
         self._press_state: dict[int, _PressState] = {}
-        self._encoder_accum: dict[int, int] = {}
-        self._encoder_flush_task: dict[int, asyncio.Task] = {}
+        self._encoder_click: dict[int, _EncoderClickState] = {}
+        self._encoder_accum: dict[tuple[int, bool], int] = {}
+        self._encoder_flush_task: dict[tuple[int, bool], asyncio.Task] = {}
         self._widget_tasks: set[asyncio.Task[None]] = set()
         self._brightness: int = self._cfg.device.brightness
         self._usage = UsageFetcher()
@@ -288,7 +294,13 @@ class Service:
 
     async def _on_encoder_press(self, event: DeckEvent) -> None:
         idx = event.encoder_index
-        if idx is None or not event.pressed:
+        if idx is None:
+            return
+        if event.pressed:
+            self._encoder_click[idx] = _EncoderClickState()
+            return
+        state = self._encoder_click.pop(idx, None)
+        if state is None or state.rotated_while_held:
             return
         enc = next((e for e in self._pages.current.encoder if e.index == idx), None)
         if enc is None or enc.on_press is None:
@@ -300,25 +312,34 @@ class Service:
         delta = event.delta or 0
         if idx is None or delta == 0:
             return
-        self._encoder_accum[idx] = self._encoder_accum.get(idx, 0) + delta
-        existing = self._encoder_flush_task.get(idx)
+        held = bool(event.pressed)
+        if held:
+            click = self._encoder_click.get(idx)
+            if click is not None:
+                click.rotated_while_held = True
+        key = (idx, held)
+        self._encoder_accum[key] = self._encoder_accum.get(key, 0) + delta
+        existing = self._encoder_flush_task.get(key)
         if existing is not None and not existing.done():
             return
-        self._encoder_flush_task[idx] = asyncio.create_task(self._flush_encoder(idx))
+        self._encoder_flush_task[key] = asyncio.create_task(self._flush_encoder(idx, held))
 
-    async def _flush_encoder(self, idx: int) -> None:
+    async def _flush_encoder(self, idx: int, held: bool) -> None:
         await asyncio.sleep(self._cfg.device.encoder_coalesce_ms / 1000.0)
-        delta = self._encoder_accum.pop(idx, 0)
+        delta = self._encoder_accum.pop((idx, held), 0)
         if delta == 0:
             return
         enc = next((e for e in self._pages.current.encoder if e.index == idx), None)
         if enc is None:
             return
-        action = enc.on_rotate_cw if delta > 0 else enc.on_rotate_ccw
+        direction = "cw" if delta > 0 else "ccw"
+        action = (enc.on_press_rotate_cw if delta > 0 else enc.on_press_rotate_ccw) if held else None
+        if action is None:
+            action = enc.on_rotate_cw if delta > 0 else enc.on_rotate_ccw
+        source = f"encoder:{idx}:press_{direction}" if held else f"encoder:{idx}:{direction}"
         if action is None:
             return
-        # Repeat the action |delta| times so vol-step etc behaves naturally
-        ctx = ActionContext(self, self._pages.name, f"encoder:{idx}:{'cw' if delta > 0 else 'ccw'}")
+        ctx = ActionContext(self, self._pages.name, source)
         for _ in range(abs(delta)):
             await dispatch(action, ctx)
 
