@@ -158,6 +158,12 @@ ENCODER_VALUE_ROTATE_CCW = 0x02
 ENCODER_VALUE_ROTATE_CW = 0x03
 ENCODER_VALUE_ROTATE_HOLD_CCW = 0x04
 ENCODER_VALUE_ROTATE_HOLD_CW = 0x05
+_ENCODER_ROTATE = {
+    ENCODER_VALUE_ROTATE_CCW: (-1, False),
+    ENCODER_VALUE_ROTATE_CW: (1, False),
+    ENCODER_VALUE_ROTATE_HOLD_CCW: (-1, True),
+    ENCODER_VALUE_ROTATE_HOLD_CW: (1, True),
+}
 
 WIDE_TILE_POS = 13
 EXTRA_BUTTON_POS_BASE = 14   # config pos 14, 15
@@ -323,10 +329,6 @@ class UlanziD200XDevice(DeckDevice):
     #
     # marker 0x01: physical button (LCD 0..12, wide tile 13, hw buttons at
     # wire indices 15/16 mapped to config pos 14/15). value = 1 press, 0 release.
-    #
-# marker 0x02: encoder. wire indices 17..19 = encoder 0..2.
-        # value 0/1 = release/press click; value 2/3 = rotate CCW/CW (one pulse
-        # per packet, no release); value 4/5 = hold-rotate CCW/CW.
     def _parse_button(self, body: bytes, *, raw: bytes) -> list[DeckEvent]:
         if len(body) < 4:
             return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=raw)]
@@ -378,24 +380,15 @@ class UlanziD200XDevice(DeckDevice):
                             extras={"state": state},
                         )
                     ]
-                if value in (ENCODER_VALUE_ROTATE_CW, ENCODER_VALUE_ROTATE_HOLD_CW):
+                rotate = _ENCODER_ROTATE.get(value)
+                if rotate is not None:
+                    delta, pressed = rotate
                     return [
                         DeckEvent(
                             kind=DeckEventKind.ENCODER_ROTATE,
                             encoder_index=enc_index,
-                            delta=1,
-                            pressed=value == ENCODER_VALUE_ROTATE_HOLD_CW,
-                            raw=raw,
-                            extras={"state": state},
-                        )
-                    ]
-                if value in (ENCODER_VALUE_ROTATE_CCW, ENCODER_VALUE_ROTATE_HOLD_CCW):
-                    return [
-                        DeckEvent(
-                            kind=DeckEventKind.ENCODER_ROTATE,
-                            encoder_index=enc_index,
-                            delta=-1,
-                            pressed=value == ENCODER_VALUE_ROTATE_HOLD_CCW,
+                            delta=delta,
+                            pressed=pressed,
                             raw=raw,
                             extras={"state": state},
                         )

@@ -332,15 +332,11 @@ class Service:
         enc = next((e for e in self._pages.current.encoder if e.index == idx), None)
         if enc is None:
             return
-        cw = delta > 0
-        if held:
-            action = enc.on_press_rotate_cw if cw else enc.on_press_rotate_ccw
-            if action is None:
-                action = enc.on_rotate_cw if cw else enc.on_rotate_ccw
-            source = f"encoder:{idx}:press_{'cw' if cw else 'ccw'}"
-        else:
-            action = enc.on_rotate_cw if cw else enc.on_rotate_ccw
-            source = f"encoder:{idx}:{'cw' if cw else 'ccw'}"
+        direction = "cw" if delta > 0 else "ccw"
+        action = (enc.on_press_rotate_cw if delta > 0 else enc.on_press_rotate_ccw) if held else None
+        if action is None:
+            action = enc.on_rotate_cw if delta > 0 else enc.on_rotate_ccw
+        source = f"encoder:{idx}:press_{direction}" if held else f"encoder:{idx}:{direction}"
         if action is None:
             return
         ctx = ActionContext(self, self._pages.name, source)
