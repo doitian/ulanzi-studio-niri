@@ -40,7 +40,7 @@ _background_tasks: set[asyncio.Task[None]] = set()
 class ActionContext:
     service: Service
     page_name: str
-    source: str  # "button:5", "encoder:0:press", "encoder:0:cw", ...
+    source: str  # "button:5", "encoder:0:press", "encoder:0:cw", "encoder:0:press_cw", ...
 
 
 async def _run_argv(argv: list[str], *, env: dict[str, str] | None = None, timeout: float = 15.0) -> int:
