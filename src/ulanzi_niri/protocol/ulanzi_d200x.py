@@ -141,8 +141,9 @@ ENCODER_COUNT = 3
 #                (config pos 15).
 #   marker 0x02: encoders. Wire indices 17..19 -> encoder 0..2.
 #                value 0x00/0x01 = release/press click; value 0x02 = rotate
-#                clockwise (single click pulse); value 0x03 = rotate
-#                counter-clockwise. Encoders never emit a release for rotate.
+#                counter-clockwise (single pulse); value 0x03 = rotate
+#                clockwise. value 0x04/0x05 = the same directions while the
+#                knob is held. Encoders never emit a release for rotate.
 #
 # Confirmed via Windows USB sniff of the official Ulanzi app on 2026-04-28.
 WIRE_INDEX_LCD_MAX = 12
@@ -155,6 +156,8 @@ ENCODER_VALUE_RELEASE = 0x00
 ENCODER_VALUE_PRESS = 0x01
 ENCODER_VALUE_ROTATE_CCW = 0x02
 ENCODER_VALUE_ROTATE_CW = 0x03
+ENCODER_VALUE_ROTATE_HOLD_CCW = 0x04
+ENCODER_VALUE_ROTATE_HOLD_CW = 0x05
 
 WIDE_TILE_POS = 13
 EXTRA_BUTTON_POS_BASE = 14   # config pos 14, 15
@@ -321,9 +324,9 @@ class UlanziD200XDevice(DeckDevice):
     # marker 0x01: physical button (LCD 0..12, wide tile 13, hw buttons at
     # wire indices 15/16 mapped to config pos 14/15). value = 1 press, 0 release.
     #
-    # marker 0x02: encoder. wire indices 17..19 = encoder 0..2.
-    # value 0/1 = release/press click; value 2/3 = rotate CW/CCW (one pulse
-    # per packet, no release).
+# marker 0x02: encoder. wire indices 17..19 = encoder 0..2.
+        # value 0/1 = release/press click; value 2/3 = rotate CCW/CW (one pulse
+        # per packet, no release); value 4/5 = hold-rotate CCW/CW.
     def _parse_button(self, body: bytes, *, raw: bytes) -> list[DeckEvent]:
         if len(body) < 4:
             return [DeckEvent(kind=DeckEventKind.UNKNOWN, raw=raw)]
@@ -375,22 +378,24 @@ class UlanziD200XDevice(DeckDevice):
                             extras={"state": state},
                         )
                     ]
-                if value == ENCODER_VALUE_ROTATE_CW:
+                if value in (ENCODER_VALUE_ROTATE_CW, ENCODER_VALUE_ROTATE_HOLD_CW):
                     return [
                         DeckEvent(
                             kind=DeckEventKind.ENCODER_ROTATE,
                             encoder_index=enc_index,
                             delta=1,
+                            pressed=value == ENCODER_VALUE_ROTATE_HOLD_CW,
                             raw=raw,
                             extras={"state": state},
                         )
                     ]
-                if value == ENCODER_VALUE_ROTATE_CCW:
+                if value in (ENCODER_VALUE_ROTATE_CCW, ENCODER_VALUE_ROTATE_HOLD_CCW):
                     return [
                         DeckEvent(
                             kind=DeckEventKind.ENCODER_ROTATE,
                             encoder_index=enc_index,
                             delta=-1,
+                            pressed=value == ENCODER_VALUE_ROTATE_HOLD_CCW,
                             raw=raw,
                             extras={"state": state},
                         )
