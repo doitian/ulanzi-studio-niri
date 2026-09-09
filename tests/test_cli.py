@@ -129,20 +129,21 @@ def test_version_subcommand(capsys) -> None:
 
 
 def test_goto_parser_accepts_page() -> None:
-    args = cli.build_parser().parse_args(["goto", "apps"])
-    assert args.cmd == "goto"
+    args = cli.build_parser().parse_args(["control", "goto", "apps"])
+    assert args.cmd == "control"
+    assert args.control_cmd == "goto"
     assert args.page == "apps"
 
 
 def test_goto_without_page_is_usage_error() -> None:
     with pytest.raises(SystemExit) as exc:
-        cli.build_parser().parse_args(["goto"])
+        cli.build_parser().parse_args(["control", "goto"])
     assert exc.value.code == 2
 
 
 def test_next_page_without_socket(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
-    assert cli.main(["next-page"]) == 1
+    assert cli.main(["control", "next-page"]) == 1
     captured = capsys.readouterr()
     assert captured.out == ""
     assert captured.err == "driver not running\n"
@@ -172,7 +173,7 @@ def test_goto_prints_ok_page_name(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = tmp_path / "ulanzi-niri.sock"
     thread = _serve_one_reply(path, "OK apps")
-    assert cli.main(["goto", "apps"]) == 0
+    assert cli.main(["control", "goto", "apps"]) == 0
     thread.join(timeout=2)
     assert capsys.readouterr().out == "apps\n"
 
@@ -181,7 +182,7 @@ def test_goto_unknown_page(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = tmp_path / "ulanzi-niri.sock"
     thread = _serve_one_reply(path, "ERR no-such-page")
-    assert cli.main(["goto", "nope"]) == 1
+    assert cli.main(["control", "goto", "nope"]) == 1
     thread.join(timeout=2)
     captured = capsys.readouterr()
     assert captured.out == ""
@@ -192,7 +193,7 @@ def test_back_stay_put_prints_name(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
     path = tmp_path / "ulanzi-niri.sock"
     thread = _serve_one_reply(path, "OK first")
-    assert cli.main(["back"]) == 0
+    assert cli.main(["control", "back"]) == 0
     thread.join(timeout=2)
     assert capsys.readouterr().out == "first\n"
 
@@ -204,4 +205,4 @@ def test_page_verbs_do_not_open_hid(monkeypatch, tmp_path) -> None:
         raise AssertionError("HID opened")
 
     monkeypatch.setattr(cli, "open_device", boom)
-    assert cli.main(["next-page"]) == 1
+    assert cli.main(["control", "next-page"]) == 1

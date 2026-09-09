@@ -57,18 +57,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_sniff)
     p_sniff.add_argument("--seconds", type=float, default=0.0, help="0 = run forever")
 
-    p_next = sub.add_parser("next-page", help="cycle to the next page in the current layer")
-    p_next.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
-
-    p_prev = sub.add_parser("prev-page", help="cycle to the previous page in the current layer")
-    p_prev.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
-
-    p_goto = sub.add_parser("goto", help="jump to a named page")
+    p_control = sub.add_parser("control", help="send a command to the running daemon")
+    p_control.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
+    ctrl = p_control.add_subparsers(dest="control_cmd", required=True)
+    ctrl.add_parser("next-page", help="cycle to the next page in the current layer")
+    ctrl.add_parser("prev-page", help="cycle to the previous page in the current layer")
+    p_goto = ctrl.add_parser("goto", help="jump to a named page")
     p_goto.add_argument("page")
-    p_goto.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
-
-    p_back = sub.add_parser("back", help="return to the previous page in history")
-    p_back.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
+    ctrl.add_parser("back", help="return to the previous page in history")
 
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
@@ -96,14 +92,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_brightness(args)
     if cmd == "sniff":
         return _cmd_sniff(args)
-    if cmd == "next-page":
-        return _cmd_page("next")
-    if cmd == "prev-page":
-        return _cmd_page("prev")
-    if cmd == "goto":
-        return _cmd_page(f"goto {args.page}")
-    if cmd == "back":
-        return _cmd_page("back")
+    if cmd == "control":
+        return _cmd_control(args)
     if cmd == "install-udev":
         return _cmd_install_udev()
     if cmd == "version":
@@ -113,6 +103,19 @@ def main(argv: list[str] | None = None) -> int:
 
 CONTROL_CONNECT_TIMEOUT = 2.0
 CONTROL_REPLY_TIMEOUT = 2.0
+
+
+def _cmd_control(args: argparse.Namespace) -> int:
+    cmd = args.control_cmd
+    if cmd == "next-page":
+        return _cmd_page("next")
+    if cmd == "prev-page":
+        return _cmd_page("prev")
+    if cmd == "goto":
+        return _cmd_page(f"goto {args.page}")
+    if cmd == "back":
+        return _cmd_page("back")
+    return 2
 
 
 def _cmd_page(request: str) -> int:

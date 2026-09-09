@@ -26,7 +26,7 @@ async def test_next_page_moves_within_layer(monkeypatch, tmp_path, capsys):
     app._device = Mock(push_buttons_zip=AsyncMock())
     await app.start_control()
     try:
-        assert await asyncio.to_thread(cli.main, ["next-page"]) == 0
+        assert await asyncio.to_thread(cli.main, ["control", "next-page"]) == 0
         assert app._pages.name == "second"
         assert capsys.readouterr().out == "second\n"
     finally:
@@ -52,7 +52,7 @@ async def test_hardware_cycle_then_cli_back_shares_history(monkeypatch, tmp_path
     try:
         await app.cycle_page(1)
         assert app._pages.name == "second"
-        assert await asyncio.to_thread(cli.main, ["back"]) == 0
+        assert await asyncio.to_thread(cli.main, ["control", "back"]) == 0
         assert app._pages.name == "first"
         assert capsys.readouterr().out == "first\n"
     finally:

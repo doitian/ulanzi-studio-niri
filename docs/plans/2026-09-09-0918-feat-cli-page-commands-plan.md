@@ -14,7 +14,7 @@ execution: code
 ## Goal Capsule
 
 - **Objective:** A D200X user can turn pages from a niri keybind or a terminal, without touching the deck, and see which page they landed on.
-- **Means:** Four `ulanzi-niri` verbs that ask the already-running driver over a per-user control socket (KTD1).
+- **Means:** `ulanzi-niri control` verbs that ask the already-running driver over a per-user control socket (KTD1).
 - **Authority:** Product Contract owns behavior. Planning Contract KTDs own mechanism. Units cite R/KTD IDs and do not invent product rules.
 - **Stop:** Do not add click, toggle, a current-page query, or one-shot HID page changes.
 - **Execution:** code. Four units. Control channel, then CLI verbs, then tests, then docs.
@@ -26,7 +26,7 @@ execution: code
 
 ### Summary
 
-Add bind-first `ulanzi-niri` commands `next-page`, `prev-page`, `goto <page>`, and `back`. They change the live deck the same way the hardware page actions do. Success prints the landed page name. They talk to the running driver and fail if it is not up.
+Add `ulanzi-niri control` commands `next-page`, `prev-page`, `goto <page>`, and `back`. They change the live deck the same way the hardware page actions do. Success prints the landed page name. They talk to the running driver and fail if it is not up.
 
 ### Problem Frame
 
@@ -34,7 +34,7 @@ Page turning today only happens from deck buttons. The user wants niri shortcuts
 
 ### Key Decisions
 
-- Bind-first verbs `next-page`, `prev-page`, `goto`, `back` (session-settled: user-directed — chosen over click-by-coordinate or toggle: niri page-turn binds this week). Governs R1, R2, R3, R4.
+- Live-driver verbs `next-page`, `prev-page`, `goto`, `back` under `ulanzi-niri control` (session-settled: user-directed — chosen over click-by-coordinate or toggle, then nested under `control` instead of top-level verbs). Governs R1, R2, R3, R4.
 - Success prints the landed page name (session-settled: user-directed — chosen over silent success or from→to verbose). Governs R8.
 - Same page rules as the buttons (session-settled: user-directed — chosen over walking every configured page). Governs R5, R6, R7.
 - Commands ask the running driver (session-settled: user-directed — chosen over a one-shot hardware poke). Governs R9, R10, R11.
@@ -43,10 +43,10 @@ Page turning today only happens from deck buttons. The user wants niri shortcuts
 
 **Commands**
 
-- R1. `ulanzi-niri next-page` moves to the next page.
-- R2. `ulanzi-niri prev-page` moves to the previous page.
-- R3. `ulanzi-niri goto <page>` jumps to that config page name.
-- R4. `ulanzi-niri back` returns to the previous page in history.
+- R1. `ulanzi-niri control next-page` moves to the next page.
+- R2. `ulanzi-niri control prev-page` moves to the previous page.
+- R3. `ulanzi-niri control goto <page>` jumps to that config page name.
+- R4. `ulanzi-niri control back` returns to the previous page in history.
 
 **Page rules**
 
@@ -72,7 +72,7 @@ Page turning today only happens from deck buttons. The user wants niri shortcuts
 ### Key Flows
 
 - F1. Niri bind
-  - **Trigger:** niri `spawn` of `next-page`, `prev-page`, `goto <page>`, or `back`.
+  - **Trigger:** niri `spawn` of `control next-page`, `control prev-page`, `control goto <page>`, or `control back`.
   - **Steps:** CLI asks the running driver. Deck matches the matching hardware page action. Stdout is unused by niri.
   - **Covered by:** R1, R2, R3, R4, R5, R10
 - F2. Terminal
@@ -89,32 +89,32 @@ Page turning today only happens from deck buttons. The user wants niri shortcuts
 - AE1. Next in layer
   - **Covers:** F1, R1, R5
   - **Given:** Driver running. Current page has a next peer in its layer.
-  - **When:** `ulanzi-niri next-page`
+  - **When:** `ulanzi-niri control next-page`
   - **Then:** Deck shows the next layer peer. Stdout is that page name. Exit 0.
 - AE2. Goto named page
   - **Covers:** R3, R6, R8
   - **Given:** Driver running. Config has page `apps`.
-  - **When:** `ulanzi-niri goto apps`
+  - **When:** `ulanzi-niri control goto apps`
   - **Then:** Deck shows `apps`. Stdout is `apps`. Exit 0.
 - AE3. Unknown goto
   - **Covers:** R6
   - **Given:** Driver running. No page named `nope`.
-  - **When:** `ulanzi-niri goto nope`
+  - **When:** `ulanzi-niri control goto nope`
   - **Then:** Page does not change. Stderr is `no such page: nope`. Exit 1.
 - AE4. Empty back
   - **Covers:** R7, R9
   - **Given:** Driver running. History is empty.
-  - **When:** `ulanzi-niri back`
+  - **When:** `ulanzi-niri control back`
   - **Then:** Page stays. Stdout is the current name. Exit 0.
 - AE5. Driver not running
   - **Covers:** F3, R11
   - **Given:** No control listener.
-  - **When:** `ulanzi-niri next-page`
+  - **When:** `ulanzi-niri control next-page`
   - **Then:** Exit 1. Stderr is `driver not running`. HID is not opened.
 
 ### Success Criteria
 
-- Binding `spawn-sh "ulanzi-niri next-page"` in niri turns the live deck the same way the next-page hardware button does, and a terminal run of the same command prints the new page name.
+- Binding `spawn-sh "ulanzi-niri control next-page"` in niri turns the live deck the same way the next-page hardware button does, and a terminal run of the same command prints the new page name.
 
 ### Scope Boundaries
 
@@ -161,7 +161,7 @@ sequenceDiagram
   participant CLI
   participant Sock as Control socket
   participant Svc as Service
-  Niri->>CLI: next-page
+  Niri->>CLI: control next-page
   CLI->>Sock: next
   Sock->>Svc: cycle_page +1
   Svc->>Svc: render or skip if unplugged
@@ -239,18 +239,18 @@ On `run` start, probe the socket path. Unlink only when connect is refused. If a
 - **Dependencies:** U1
 - **Files:** `src/ulanzi_niri/cli.py`, `tests/test_cli.py`
 - **Approach:**
-  1. Add `next-page`, `prev-page`, `goto`, and `back` to `build_parser`. `goto` takes a positional page name.
+  1. Add a `control` subcommand with `next-page`, `prev-page`, `goto`, and `back`. `goto` takes a positional page name.
   2. Blocking sockets in `cli.py`. Do not `asyncio.run` and do not import `Service` (KTD5).
   3. Connect, send, print per KTD5. Do not call `open_device`. Do not add `--config`.
   4. Connect fail is `driver not running`, exit 1. Do not map an in-flight timeout to that string (KTD4).
 - **Patterns to follow:** `build_parser` / `main` dispatch. `tests/test_cli.py` `parse_args` and `main` + `monkeypatch` + `capsys`. `no such page:` copy from `render`/`push`.
 - **Test scenarios:**
-  - Covers AE2. Parser accepts `goto apps`.
-  - Covers AE5. No socket: `next-page` exits 1, stderr `driver not running`, stdout empty.
-  - Fake reply `OK apps`: `goto apps` exits 0, stdout `apps`.
+  - Covers AE2. Parser accepts `control goto apps`.
+  - Covers AE5. No socket: `control next-page` exits 1, stderr `driver not running`, stdout empty.
+  - Fake reply `OK apps`: `control goto apps` exits 0, stdout `apps`.
   - Fake reply unknown: stderr `no such page: nope`, exit 1.
   - Covers AE4. Fake stay-put back: exit 0, stdout current name.
-  - `goto` without a name is argparse usage exit 2.
+  - `control goto` without a name is argparse usage exit 2.
   - These verbs do not open HID.
 - **Verification:** CLI tests pass without a real daemon. Parser help lists the four commands.
 
@@ -268,7 +268,7 @@ On `run` start, probe the socket path. Unlink only when connect is refused. If a
 - **Execution note:** In-process listener plus threaded CLI. No subprocess `ulanzi-niri run`. No hidraw.
 - **Patterns to follow:** `tests/test_service.py` page-indicator config injection and FakeDevice. `tests/test_ai_usage.py` `monkeypatch.setenv` for XDG. Keep `tests/test_cli.py` as parser/`capsys` only.
 - **Test scenarios:**
-  - Covers AE1. Threaded `next-page` against that service moves within the layer and prints the new name.
+  - Covers AE1. Threaded `control next-page` against that service moves within the layer and prints the new name.
   - `cycle_page(1)` then threaded `back` on the same instance shares history.
 - **Verification:** The new test file passes with `uv run pytest` on those tests. No device needed.
 
@@ -280,7 +280,7 @@ On `run` start, probe the socket path. Unlink only when connect is refused. If a
 - **Files:** `README.md`
 - **Approach:**
   1. Show the four commands.
-  2. Show a niri `spawn` / `spawn-sh` example for next and prev.
+  2. Show a niri `spawn` / `spawn-sh` example for `control next-page` and `control prev-page`.
   3. State that the daemon must be running and that success prints the page name.
 - **Patterns to follow:** README Development command list and Hardware/config tone.
 - **Test expectation:** none -- documentation only.
@@ -303,7 +303,7 @@ U1 is proven by service listener and unplug tests. U2 is proven by CLI parser an
 
 - R1–R13 are implemented and traced from U1–U4.
 - AE1–AE5 pass via U2 and U3 tests.
-- `ulanzi-niri next-page` with the daemon up changes the live page and prints the name.
+- `ulanzi-niri control next-page` with the daemon up changes the live page and prints the name.
 - The same command with the daemon down exits 1 with `driver not running` and does not open HID.
 - Unplug plus a page command does not crash `run`.
 - README shows niri bind examples.

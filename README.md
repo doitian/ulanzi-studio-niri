@@ -204,20 +204,20 @@ With the daemon running, niri (or any keybind) can turn pages without
 touching the deck. Success prints the landed page name.
 
 ```sh
-ulanzi-niri next-page
-ulanzi-niri prev-page
-ulanzi-niri goto apps
-ulanzi-niri back
+ulanzi-niri control next-page
+ulanzi-niri control prev-page
+ulanzi-niri control goto apps
+ulanzi-niri control back
 ```
 
 niri spawn examples (`~/.config/niri/config.kdl`):
 
 ```kdl
 binds {
-    Mod+Shift+Page_Down { spawn-sh "ulanzi-niri next-page"; }
-    Mod+Shift+Page_Up { spawn-sh "ulanzi-niri prev-page"; }
-    Mod+Shift+A { spawn-sh "ulanzi-niri goto apps"; }
-    Mod+Shift+BackSpace { spawn-sh "ulanzi-niri back"; }
+    Mod+Shift+Page_Down { spawn-sh "ulanzi-niri control next-page"; }
+    Mod+Shift+Page_Up { spawn-sh "ulanzi-niri control prev-page"; }
+    Mod+Shift+A { spawn-sh "ulanzi-niri control goto apps"; }
+    Mod+Shift+BackSpace { spawn-sh "ulanzi-niri control back"; }
 }
 ```
 
