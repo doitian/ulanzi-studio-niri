@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -17,6 +18,7 @@ from .config import (
     PageConfig,
     UrlAction,
     WideTileEntry,
+    control_socket_path,
     load_config,
 )
 from .pages import PageSet
@@ -61,10 +63,14 @@ class Service:
         self._brightness: int = self._cfg.device.brightness
         self._usage = UsageFetcher()
         self._usage.set_on_update(self._on_usage_update)
+        self._page_lock = asyncio.Lock()
+        self._control_server: asyncio.AbstractServer | None = None
+        self._control_path: Path | None = None
 
     # ------------------------------------------------------------------ public lifecycle
     async def run(self) -> None:
         prime_cpu_sampler()
+        await self.start_control()
         reload_task = asyncio.create_task(self._watch_config(), name="config-watcher")
         try:
             while not self._stop.is_set():
@@ -75,6 +81,7 @@ class Service:
                 await asyncio.sleep(2.0)
         finally:
             reload_task.cancel()
+            await self.stop_control()
             if self._wide is not None:
                 await self._wide.stop()
             if self._device is not None:
@@ -82,6 +89,104 @@ class Service:
 
     async def stop(self) -> None:
         self._stop.set()
+
+    async def start_control(self) -> bool:
+        path = control_socket_path()
+        if path is None:
+            log.warning("XDG_RUNTIME_DIR unset; control socket disabled")
+            return False
+        if await self._control_path_in_use(path):
+            log.warning("control socket already in use; not binding")
+            return False
+        path.parent.mkdir(mode=0o700, exist_ok=True)
+        if path.exists():
+            path.unlink()
+        self._control_server = await asyncio.start_unix_server(self._on_control, path=str(path))
+        path.chmod(0o600)
+        self._control_path = path
+        log.info("control socket: %s", path)
+        return True
+
+    async def stop_control(self) -> None:
+        server = self._control_server
+        self._control_server = None
+        if server is not None:
+            server.close()
+            await server.wait_closed()
+        if self._control_path is not None and self._control_path.exists():
+            self._control_path.unlink()
+        self._control_path = None
+
+    async def apply_control(self, line: str) -> str:
+        async with self._page_lock:
+            return await self._apply_control_locked(line)
+
+    async def _control_path_in_use(self, path: Path) -> bool:
+        if not path.exists():
+            return False
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(0.2)
+            sock.connect(str(path))
+            sock.close()
+            return True
+        except (ConnectionRefusedError, FileNotFoundError, TimeoutError, OSError):
+            return False
+
+    async def _on_control(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        try:
+            raw = await asyncio.wait_for(reader.readline(), timeout=2.0)
+            line = raw.decode().strip()
+            reply = await self.apply_control(line)
+            writer.write((reply + "\n").encode())
+            await writer.drain()
+        except Exception:  # noqa: BLE001
+            log.exception("control client failed")
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async def _apply_control_locked(self, line: str) -> str:
+        if line.startswith("goto "):
+            name = line[5:].strip()
+            if not name or self._cfg.get_page(name) is None:
+                return "ERR no-such-page"
+            if self._device is None:
+                return "ERR no-device"
+            await self._switch_unlocked(name)
+            return f"OK {self._pages.name}"
+        if line in {"next", "prev", "back"}:
+            if self._device is None:
+                return "ERR no-device"
+            if line == "next":
+                await self._cycle_unlocked(1)
+            elif line == "prev":
+                await self._cycle_unlocked(-1)
+            else:
+                await self._back_unlocked()
+            return f"OK {self._pages.name}"
+        return "ERR unknown"
+
+    async def _switch_unlocked(self, name: str) -> None:
+        if self._pages.switch(name) is None:
+            return
+        if self._device is not None:
+            await self._render_current_page()
+            self._start_wide_tile_worker()
+
+    async def _back_unlocked(self) -> None:
+        if self._pages.back() is None:
+            return
+        if self._device is not None:
+            await self._render_current_page()
+            self._start_wide_tile_worker()
+
+    async def _cycle_unlocked(self, step: int) -> None:
+        target = self._cfg.cycle_target(self._pages.name, step)
+        if target is not None:
+            await self._switch_unlocked(target)
 
     # ------------------------------------------------------------------ device cycle
     async def _connect_and_serve(self) -> None:
@@ -345,27 +450,24 @@ class Service:
 
     # ------------------------------------------------------------------ control surface (used by actions)
     async def switch_page(self, name: str) -> None:
-        if self._pages.switch(name) is None:
-            return
-        await self._render_current_page()
-        self._start_wide_tile_worker()
+        async with self._page_lock:
+            await self._switch_unlocked(name)
 
     async def page_back(self) -> None:
-        if self._pages.back() is None:
-            return
-        await self._render_current_page()
-        self._start_wide_tile_worker()
+        async with self._page_lock:
+            await self._back_unlocked()
 
     async def page_toggle(self, name: str) -> None:
-        if self._pages.toggle(name) is None:
-            return
-        await self._render_current_page()
-        self._start_wide_tile_worker()
+        async with self._page_lock:
+            if self._pages.toggle(name) is None:
+                return
+            if self._device is not None:
+                await self._render_current_page()
+                self._start_wide_tile_worker()
 
     async def cycle_page(self, step: int) -> None:
-        target = self._cfg.cycle_target(self._pages.name, step)
-        if target is not None:
-            await self.switch_page(target)
+        async with self._page_lock:
+            await self._cycle_unlocked(step)
 
     async def set_brightness(self, value: int) -> None:
         self._brightness = max(0, min(100, int(value)))
@@ -409,12 +511,13 @@ class Service:
             log.exception("config reload failed; keeping previous")
             return
         log.info("config reloaded")
-        self._cfg = new_cfg
-        self._pages.replace_config(new_cfg)
-        if self._device is not None:
-            await self._device.set_label_style(new_cfg.label.model_dump(), force=True)
-            await self._render_current_page()
-            self._start_wide_tile_worker()
+        async with self._page_lock:
+            self._cfg = new_cfg
+            self._pages.replace_config(new_cfg)
+            if self._device is not None:
+                await self._device.set_label_style(new_cfg.label.model_dump(), force=True)
+                await self._render_current_page()
+                self._start_wide_tile_worker()
 
 
 async def run_service(config_path: Path) -> None:

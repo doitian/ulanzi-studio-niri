@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+import socket
+import threading
+from pathlib import Path
+
+import pytest
+
 from ulanzi_niri import ai_usage, cli
 
 
@@ -120,3 +126,82 @@ def test_usage_subcommand_rejects_invalid_timeout(capsys) -> None:
 def test_version_subcommand(capsys) -> None:
     assert cli.main(["version"]) == 0
     assert capsys.readouterr().out.startswith("ulanzi-niri ")
+
+
+def test_goto_parser_accepts_page() -> None:
+    args = cli.build_parser().parse_args(["goto", "apps"])
+    assert args.cmd == "goto"
+    assert args.page == "apps"
+
+
+def test_goto_without_page_is_usage_error() -> None:
+    with pytest.raises(SystemExit) as exc:
+        cli.build_parser().parse_args(["goto"])
+    assert exc.value.code == 2
+
+
+def test_next_page_without_socket(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    assert cli.main(["next-page"]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "driver not running\n"
+
+
+def _serve_one_reply(path: Path, reply: str) -> threading.Thread:
+    ready = threading.Event()
+
+    def run() -> None:
+        srv = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        srv.bind(str(path))
+        srv.listen(1)
+        ready.set()
+        conn, _ = srv.accept()
+        conn.recv(256)
+        conn.sendall((reply + "\n").encode())
+        conn.close()
+        srv.close()
+
+    thread = threading.Thread(target=run, daemon=True)
+    thread.start()
+    assert ready.wait(timeout=2)
+    return thread
+
+
+def test_goto_prints_ok_page_name(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = tmp_path / "ulanzi-niri.sock"
+    thread = _serve_one_reply(path, "OK apps")
+    assert cli.main(["goto", "apps"]) == 0
+    thread.join(timeout=2)
+    assert capsys.readouterr().out == "apps\n"
+
+
+def test_goto_unknown_page(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = tmp_path / "ulanzi-niri.sock"
+    thread = _serve_one_reply(path, "ERR no-such-page")
+    assert cli.main(["goto", "nope"]) == 1
+    thread.join(timeout=2)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "no such page: nope\n"
+
+
+def test_back_stay_put_prints_name(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    path = tmp_path / "ulanzi-niri.sock"
+    thread = _serve_one_reply(path, "OK first")
+    assert cli.main(["back"]) == 0
+    thread.join(timeout=2)
+    assert capsys.readouterr().out == "first\n"
+
+
+def test_page_verbs_do_not_open_hid(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    def boom() -> None:
+        raise AssertionError("HID opened")
+
+    monkeypatch.setattr(cli, "open_device", boom)
+    assert cli.main(["next-page"]) == 1

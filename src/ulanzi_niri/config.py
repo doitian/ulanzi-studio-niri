@@ -373,6 +373,13 @@ def default_config_path() -> Path:
     return Path(base) / "ulanzi-niri" / "config.toml"
 
 
+def control_socket_path() -> Path | None:
+    runtime = os.environ.get("XDG_RUNTIME_DIR")
+    if not runtime:
+        return None
+    return Path(runtime) / "ulanzi-niri.sock"
+
+
 def load_config(path: Path | None = None) -> Config:
     p = path or default_config_path()
     with open(p, "rb") as fp:
