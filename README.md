@@ -198,6 +198,31 @@ under the search roots. A bare name (`firefox`) matches `firefox.png` or
 `NxN` directory components). SVG icons are not currently supported — drop
 a PNG into `~/.config/ulanzi-niri/icons/` for SVG-only themes.
 
+## Keyboard control
+
+With the daemon running, niri (or any keybind) can turn pages without
+touching the deck. Success prints the landed page name.
+
+```sh
+ulanzi-niri control next-page
+ulanzi-niri control prev-page
+ulanzi-niri control goto apps
+ulanzi-niri control back
+```
+
+niri spawn examples (`~/.config/niri/config.kdl`):
+
+```kdl
+binds {
+    Mod+Shift+Page_Down { spawn-sh "ulanzi-niri control next-page"; }
+    Mod+Shift+Page_Up { spawn-sh "ulanzi-niri control prev-page"; }
+    Mod+Shift+A { spawn-sh "ulanzi-niri control goto apps"; }
+    Mod+Shift+BackSpace { spawn-sh "ulanzi-niri control back"; }
+}
+```
+
+If the daemon is not running the command exits 1 with `driver not running`.
+
 ## Development
 
 ```sh

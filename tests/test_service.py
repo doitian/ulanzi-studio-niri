@@ -15,6 +15,7 @@ from ulanzi_niri.config import (
     NoopAction,
     PageConfig,
     UsageWidget,
+    control_socket_path,
 )
 from ulanzi_niri.protocol.device import DeckEvent, DeckEventKind
 
@@ -366,3 +367,72 @@ async def test_encoder_page_switch_swallows_in_flight_click(monkeypatch):
     await app._on_encoder_press(_press(0, False))
 
     dispatch.assert_not_awaited()
+
+
+def _page_service(monkeypatch, tmp_path, *, device: bool = True):
+    cfg = Config(
+        page=[
+            PageConfig(name="first", layer="home"),
+            PageConfig(name="folder", layer="folder"),
+            PageConfig(name="second", layer="home"),
+        ]
+    )
+    monkeypatch.setattr(service, "load_config", lambda _: cfg)
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    app = service.Service("unused.toml")
+    monkeypatch.setattr(service, "render_background", Mock(return_value=b"bg"))
+    monkeypatch.setattr(service, "build_buttons_zip", Mock(return_value=b"zip"))
+    monkeypatch.setattr(app, "_start_wide_tile_worker", Mock())
+    if device:
+        app._device = Mock(push_buttons_zip=AsyncMock())
+    return app
+
+
+async def test_control_next_lands_on_layer_peer(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path)
+    assert await app.apply_control("next") == "OK second"
+    assert app._pages.name == "second"
+
+
+async def test_control_unknown_goto_does_not_switch(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path)
+    assert await app.apply_control("goto nope") == "ERR no-such-page"
+    assert app._pages.name == "first"
+
+
+async def test_control_empty_back_stays(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path)
+    assert await app.apply_control("back") == "OK first"
+    assert app._pages.name == "first"
+
+
+async def test_control_unplug_fails_without_mutating(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path, device=False)
+    await app.start_control()
+    try:
+        assert await app.apply_control("next") == "ERR no-device"
+        assert app._pages.name == "first"
+        assert app._control_server is not None
+    finally:
+        await app.stop_control()
+
+
+async def test_control_listener_gone_after_stop(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path)
+    assert await app.start_control()
+    path = control_socket_path()
+    assert path is not None and path.exists()
+    await app.stop_control()
+    assert not path.exists()
+
+
+async def test_control_second_start_does_not_steal(monkeypatch, tmp_path):
+    first = _page_service(monkeypatch, tmp_path)
+    assert await first.start_control()
+    second = _page_service(monkeypatch, tmp_path)
+    try:
+        assert await second.start_control() is False
+        assert await first.apply_control("next") == "OK second"
+    finally:
+        await first.stop_control()
+        await second.stop_control()

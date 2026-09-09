@@ -6,12 +6,13 @@ import argparse
 import asyncio
 import logging
 import os
+import socket
 import sys
 import time
 from importlib import resources
 from pathlib import Path
 
-from .config import default_config_path, load_config
+from .config import control_socket_path, default_config_path, load_config
 from .log import configure as configure_logging
 from .protocol.manager import find_device_path, open_device
 
@@ -56,6 +57,15 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p_sniff)
     p_sniff.add_argument("--seconds", type=float, default=0.0, help="0 = run forever")
 
+    p_control = sub.add_parser("control", help="send a command to the running daemon")
+    p_control.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
+    ctrl = p_control.add_subparsers(dest="control_cmd", required=True)
+    ctrl.add_parser("next-page", help="cycle to the next page in the current layer")
+    ctrl.add_parser("prev-page", help="cycle to the previous page in the current layer")
+    p_goto = ctrl.add_parser("goto", help="jump to a named page")
+    p_goto.add_argument("page")
+    ctrl.add_parser("back", help="return to the previous page in history")
+
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
     sub.add_parser("version", help="print the package version")
@@ -82,11 +92,70 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_brightness(args)
     if cmd == "sniff":
         return _cmd_sniff(args)
+    if cmd == "control":
+        return _cmd_control(args)
     if cmd == "install-udev":
         return _cmd_install_udev()
     if cmd == "version":
         return _cmd_version()
     return 2
+
+
+CONTROL_CONNECT_TIMEOUT = 2.0
+CONTROL_REPLY_TIMEOUT = 2.0
+
+
+def _cmd_control(args: argparse.Namespace) -> int:
+    cmd = args.control_cmd
+    if cmd == "next-page":
+        return _cmd_page("next")
+    if cmd == "prev-page":
+        return _cmd_page("prev")
+    if cmd == "goto":
+        return _cmd_page(f"goto {args.page}")
+    if cmd == "back":
+        return _cmd_page("back")
+    return 2
+
+
+def _cmd_page(request: str) -> int:
+    path = control_socket_path()
+    if path is None:
+        print("driver not running", file=sys.stderr)
+        return 1
+    sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    sock.settimeout(CONTROL_CONNECT_TIMEOUT)
+    try:
+        sock.connect(str(path))
+    except OSError:
+        print("driver not running", file=sys.stderr)
+        return 1
+    sock.settimeout(CONTROL_REPLY_TIMEOUT)
+    try:
+        sock.sendall((request + "\n").encode())
+        sock.shutdown(socket.SHUT_WR)
+        raw = sock.makefile().readline()
+    except TimeoutError:
+        print("driver busy", file=sys.stderr)
+        return 1
+    except OSError:
+        print("driver not running", file=sys.stderr)
+        return 1
+    finally:
+        sock.close()
+    reply = raw.strip()
+    if reply.startswith("OK "):
+        print(reply[3:])
+        return 0
+    if reply == "ERR no-such-page":
+        name = request.removeprefix("goto ").strip()
+        print(f"no such page: {name}", file=sys.stderr)
+        return 1
+    if reply == "ERR no-device":
+        print("device not connected", file=sys.stderr)
+        return 1
+    print("driver busy", file=sys.stderr)
+    return 1
 
 
 # ---------------------------------------------------------------------------- handlers
