@@ -1,5 +1,7 @@
 # ulanzi-studio-niri
 
+[![PyPI version](https://img.shields.io/pypi/v/ulanzi-studio-niri)](https://pypi.org/project/ulanzi-studio-niri/)
+
 A Linux daemon that drives the **Ulanzi Stream Controller D200X** and integrates
 it with the [Niri](https://github.com/YaLTeR/niri) Wayland compositor.
 
