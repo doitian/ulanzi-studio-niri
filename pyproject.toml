@@ -39,6 +39,7 @@ Issues = "https://github.com/doitian/ulanzi-studio-niri/issues"
 
 [dependency-groups]
 dev = [
+    "git-changelog==2.9.7",
     "pytest>=8",
     "pytest-asyncio>=0.23",
     "ruff>=0.6",
@@ -47,6 +48,13 @@ dev = [
 
 [tool.uv]
 python-preference = "only-system"
+
+[tool.git-changelog]
+convention = "conventional"
+provider = "github"
+template = "path:config/changelog.md.jinja"
+output = "CHANGELOG.md"
+sections = ["feat", "fix", "docs", "perf", "refactor", "deps", "revert"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ulanzi_niri"]

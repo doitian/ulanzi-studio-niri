@@ -1,0 +1,42 @@
+{%- set latest = changelog.versions_list | selectattr('tag') | first -%}
+{%- set upcoming = jinja_context.package_version != latest.tag.removeprefix('v') -%}
+{%- set groups = {
+  'Added': ['Features'],
+  'Changed': ['Docs', 'Performance Improvements', 'Code Refactoring', 'Dependencies', 'Reverts'],
+  'Fixed': ['Bug Fixes'],
+} -%}
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased](https://github.com/doitian/ulanzi-studio-niri/compare/{{ latest.tag }}...HEAD)
+{%- if upcoming %}
+
+## [{{ jinja_context.package_version }}](https://github.com/doitian/ulanzi-studio-niri/compare/{{ latest.tag }}...HEAD) - Unreleased
+{%- endif %}
+{%- for version in changelog.versions_list %}
+{%- if version.tag %}
+
+## [{{ version.tag.removeprefix('v') }}]({{ version.compare_url }}) - {{ version.date }}
+{%- endif %}
+{#- The two historical releases intentionally have no entries. -#}
+{%- if version.tag not in ['v1.0.0', 'v2.0.0'] %}
+{%- for title, types in groups.items() %}
+{%- set notes = namespace(commits=[]) %}
+{%- for section in version.sections_list if section.type in types %}
+{%- set notes.commits = notes.commits + section.commits %}
+{%- endfor %}
+{%- if notes.commits %}
+
+### {{ title }}
+{% for commit in notes.commits | unique(attribute='subject') %}
+- {% if commit.convention.is_major %}**Breaking:** {% endif %}{{ commit.convention.subject }} ([{{ commit.hash[:7] }}]({{ commit.url }})).
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
+{%- endfor %}
+{{- '\n' -}}

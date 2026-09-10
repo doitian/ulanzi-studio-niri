@@ -252,6 +252,37 @@ uv run ruff check .             # lint
 
 ## Releases
 
+### Updating the changelog
+
+[git-changelog](https://github.com/pawamoy/git-changelog) generates
+[CHANGELOG.md](CHANGELOG.md) using the configuration in `pyproject.toml` and
+`config/changelog.md.jinja`. Run from the repository root:
+
+```sh
+uv run python scripts/update_changelog.py
+```
+
+The command reads the package version from `pyproject.toml`:
+
+- When it matches the latest release tag, changes accumulate under `Unreleased`.
+- When it differs, changes go under that upcoming version, labeled `Unreleased`
+  until tagged. After tagging, the next run uses the release commit's date.
+- The `1.0.0` and `2.0.0` sections stay empty; only later changes are listed.
+
+Use Conventional Commit subjects: `feat: ...` for Added, `fix: ...` for Fixed,
+`docs: ...`, `perf: ...`, `refactor: ...`, `deps: ...`, or `revert: ...` for
+Changed. Breaking changes (`!` or `BREAKING CHANGE:`) are marked. Routine
+build, chore, CI, style, test, and merge commits are omitted. Write subjects
+for readers and review generated notes before release.
+
+The command regenerates the file from committed history, so direct edits to
+entries are overwritten. Fetch full history and tags if needed
+(`git fetch --tags`, or `git fetch --unshallow --tags` in a shallow clone).
+Commit the changes to include before running the command; an uncommitted
+package version bump is supported.
+
+### Publishing
+
 Pushing a stable semantic version tag such as `v2.0.0` runs
 [the release workflow](.github/workflows/publish.yml). Tags must be exactly
 `vMAJOR.MINOR.PATCH`, with no leading zeroes. Prerelease and build-metadata
@@ -282,8 +313,11 @@ disabled if releases should publish without manual approval. The publish job
 uses GitHub OIDC with `id-token: write`; no PyPI API token or password secret
 is needed.
 
-To release, update `pyproject.toml`, run `uv lock`, commit the version change
-and release workflow, then tag and push that commit. For example, when the
+To release, commit the changes to include, update `pyproject.toml`, run
+`uv lock`, and run `uv run python scripts/update_changelog.py`. Review the changelog,
+commit it with the version change, then tag and push that commit. Use a
+`chore: release VERSION` commit subject to avoid adding a release bookkeeping
+entry. For example, when the
 committed version is `2.0.0`:
 
 ```sh
