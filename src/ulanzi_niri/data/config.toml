@@ -1,0 +1,306 @@
+# Example config for ulanzi-niri (Ulanzi Stream Controller D200X).
+# Copy to: ~/.config/ulanzi-niri/config.toml
+#
+# Layout reminder:
+#   pos  0..4   row 0 LCD (5 buttons)
+#   pos  5..9   row 1 LCD (5 buttons)
+#   pos 10..12  row 2 LCD (3 buttons; pos 13 is the wide tile)
+#   pos 14..15  plain hardware buttons (left, right of LCDs)
+# Encoders are configured separately via [[page.encoder]] with index 0..2.
+# Click fires on release and is cancelled if the knob turned while held.
+# Unset on_press_rotate_* keys fall through to on_rotate_*.
+# Use { type = "noop" } on a press-rotate key to silence that direction.
+
+[device]
+brightness = 70
+stats_interval_ms = 1000
+encoder_coalesce_ms = 50
+
+[label]
+align = "bottom"
+color = "CDCDCD"
+font_name = "Roboto"
+show_title = true
+size = 28
+weight = 80
+
+# ----------------------------------------------------------------------- main page
+[[page]]
+name = "main"
+layer = "home"
+default = true
+
+[[page.button]]
+pos = 0
+label = "Term"
+icon = "kitty"
+on_press = { type = "exec", cmd = "kitty" }
+
+[[page.button]]
+pos = 1
+label = "Browser"
+icon = "firefox"
+on_press = { type = "exec", cmd = "firefox" }
+
+[[page.button]]
+pos = 2
+label = "Claude"
+icon = "claude-desktop"
+on_press = { type = "exec", cmd = "claude-desktop" }
+
+[[page.button]]
+pos = 3
+label = "VS Code"
+icon = "visual-studio-code"
+on_press = { type = "exec", cmd = "code" }
+
+[[page.button]]
+pos = 4
+label = "Obsidian"
+icon = "obsidian"
+on_press = { type = "exec", cmd = "obsidian" }
+
+[[page.button]]
+pos = 5
+label = "Focus L"
+icon = "arrow-left"
+on_press = { type = "niri", action = "focus-column-left" }
+
+[[page.button]]
+pos = 6
+label = "Focus D"
+icon = "arrow-down"
+on_press = { type = "niri", action = "focus-window-or-workspace-down" }
+
+[[page.button]]
+pos = 7
+label = "Focus U"
+icon = "arrow-up"
+on_press = { type = "niri", action = "focus-window-or-workspace-up" }
+
+[[page.button]]
+pos = 8
+label = "Focus R"
+icon = "arrow-right"
+on_press = { type = "niri", action = "focus-column-right" }
+
+[[page.button]]
+pos = 9
+label = "Web"
+icon = "applications-internet"
+on_press = { type = "page", goto = "apps" }
+
+[[page.button]]
+pos = 10
+label = "Voice"
+icon = "audio-input-microphone"
+# Toggle hyprwhspr recording (voice input).
+on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
+
+[[page.button]]
+pos = 11
+label = "Maximize"
+icon = "view-fullscreen"
+on_press = { type = "niri", action = "maximize-column" }
+
+[[page.button]]
+pos = 12
+label = "Overview"
+icon = "view-grid"
+on_press = { type = "niri", action = "toggle-overview" }
+
+[[page.button]]
+pos = 14
+label = "Prev"
+on_press = { type = "page", cycle = -1 }
+
+[[page.button]]
+pos = 15
+label = "Next"
+on_press = { type = "page", cycle = 1 }
+
+[page.wide_tile]
+mode = "stats"
+format = "%H:%M:%S"
+
+[[page.encoder]]
+index = 0
+label = "Vol"
+on_press = { type = "media", cmd = "mute" }
+on_rotate_cw = { type = "media", cmd = "vol-up", step = 2 }
+on_rotate_ccw = { type = "media", cmd = "vol-down", step = 2 }
+on_press_rotate_cw = { type = "media", cmd = "next" }
+on_press_rotate_ccw = { type = "media", cmd = "prev" }
+
+[[page.encoder]]
+index = 1
+label = "Bri"
+on_rotate_cw = { type = "brightness", delta = 5 }
+on_rotate_ccw = { type = "brightness", delta = -5 }
+
+# ----------------------------------------------------------------------- second page
+[[page]]
+name = "apps"
+layer = "web"
+
+[[page.button]]
+pos = 0
+label = "Back"
+icon = "draw-arrow-back"
+on_press = { type = "page", back = true }
+
+[[page.button]]
+pos = 1
+label = "Discord"
+icon = "discord"
+on_press = { type = "url", url = "https://discord.com/channels/@me" }
+
+[[page.button]]
+pos = 2
+label = "Usage"
+icon = "utilities-system-monitor"
+on_press = { type = "page", goto = "usage" }
+
+[[page.button]]
+pos = 14
+label = "Prev"
+on_press = { type = "page", cycle = -1 }
+
+[[page.button]]
+pos = 15
+label = "Next"
+on_press = { type = "page", cycle = 1 }
+
+[page.wide_tile]
+mode = "time-weekday"
+
+# Pages share a `layer`. `cycle` (buttons 14/15 above) moves between pages
+# *within the current layer*. A button that does `goto` (or `toggle`) to a page
+# in another layer switches layers — e.g. "Web" on the main page jumps into
+# the "web" layer, which can hold several pages:
+#
+# [[page]]
+# name = "apps2"
+# layer = "web"
+# ...
+
+# ----------------------------------------------------------------------- usage page
+# A page that shows remaining Claude/Codex/OpenCode Go/xAI usage and the Moonshot
+# (Kimi API) account balance on LCD buttons. Uses credentials maintained by
+# `claude /login`, `codex login`, `grok login`, and OpenCode `/connect`. Provider data is
+# fetched directly and refreshed every 30 minutes.
+# Uncomment this page to enable it — the "Usage" button above points at it.
+#
+# Pressing a usage button requests a refresh (throttled to once every 90 seconds)
+# and opens the provider's usage page in the browser
+# (defaults: claude.ai, chatgpt.com, opencode.ai/go, grok.com, platform.kimi.com);
+# set `url` on a widget to override it.
+#
+# [[page]]
+# name = "usage"
+# layer = "home"
+#
+# [[page.button]]
+# pos = 0
+# label = "AI Limits"
+# icon = "ai-usage"
+# # Placeholder: no button actions.
+#
+# [[page.widget]]
+# pos = 3
+# provider = "claude"
+# account = ""
+# limit = "seven_day_fable"
+# label = "FABLE"
+# icon = "claude-desktop"
+#
+# [[page.widget]]
+# pos = 1
+# provider = "claude"
+# account = ""
+# limit = "five_hour"
+# label = "5H"
+# icon = "claude-desktop"
+#
+# [[page.widget]]
+# pos = 2
+# provider = "claude"
+# account = ""
+# limit = "seven_day"
+# label = "7D"
+# icon = "claude-desktop"
+#
+# [[page.widget]]
+# pos = 5
+# provider = "codex"
+# account = ""
+# limit = "five_hour"
+# label = "5H"
+# icon = "chatgpt"
+#
+# [[page.widget]]
+# pos = 6
+# provider = "codex"
+# account = ""
+# limit = "seven_day"
+# label = "7D"
+# icon = "chatgpt"
+#
+# [[page.widget]]
+# pos = 7
+# provider = "opencode-go"
+# account = ""
+# limit = "rolling"
+# label = "5H"
+# icon = "opencode"
+#
+# [[page.widget]]
+# pos = 8
+# provider = "opencode-go"
+# account = ""
+# limit = "weekly"
+# label = "7D"
+# icon = "opencode"
+#
+# [[page.widget]]
+# pos = 9
+# provider = "opencode-go"
+# account = ""
+# limit = "monthly"
+# label = "30D"
+# icon = "opencode"
+#
+# Moonshot (Kimi API) is pay-as-you-go, so it shows the remaining balance
+# instead of a percentage. The API key is read from MOONSHOT_API_KEY (with
+# optional MOONSHOT_BASE_URL) or the `moonshotai` / `moonshotai-cn` entries in
+# OpenCode's auth.json; moonshotai-cn targets the China platform (CNY).
+#
+# [[page.widget]]
+# pos = 4
+# provider = "moonshot"
+# account = ""
+# limit = "balance"
+# label = "BAL"
+# icon = "moonshot"
+# url = "https://platform.kimi.com/console/account"  # override the press URL
+#
+# [[page.widget]]
+# pos = 10
+# provider = "xai"
+# account = ""
+# limit = "weekly"
+# label = "7D"
+# icon = "xai"
+#
+# [[page.button]]
+# pos = 14
+# label = "Prev"
+# on_press = { type = "page", cycle = -1 }
+#
+# [[page.button]]
+# pos = 15
+# label = "Next"
+# on_press = { type = "page", cycle = 1 }
+#
+# [page.wide_tile]
+# mode = "time-weekday"

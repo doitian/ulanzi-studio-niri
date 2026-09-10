@@ -127,42 +127,57 @@ binding silences that direction instead.
 
 ## Installation
 
-This project uses [uv](https://github.com/astral-sh/uv) and runs against the
-system Python interpreter.
+Install into a virtual environment with pip, then run setup as your desktop user:
 
 ```sh
-# Development install
-uv venv --python /usr/bin/python3 .venv
-uv sync
-
-# End-user install (creates ~/.local/bin/ulanzi-niri)
-uv tool install .
+python3 -m venv ~/.local/share/ulanzi-niri-venv
+~/.local/share/ulanzi-niri-venv/bin/pip install ulanzi-studio-niri
+~/.local/share/ulanzi-niri-venv/bin/ulanzi-niri setup
 ```
 
-Or run the one-shot installer, which performs the tool install, udev rule,
-and systemd service setup together:
+Alternatively, use `uv tool install ulanzi-studio-niri` and `ulanzi-niri setup`.
+No repository checkout is needed. The package includes the example config,
+udev rule, and systemd service template. Icons are not bundled.
+
+Setup creates the example config if missing and installs, enables, and starts
+the systemd user service. It checks the installed udev rule and asks you to run
+`sudo ulanzi-niri admin-setup` if the rule is missing or outdated. Setup itself
+never runs privileged commands. Existing
+config files (including symlinks) are preserved. The service uses the Python
+environment that ran setup and the selected XDG config path. Run setup again
+after moving or replacing that environment; it updates and restarts the service.
+Install or update the udev rule separately:
 
 ```sh
-./bin/install
+sudo ulanzi-niri admin-setup
 ```
 
-### udev rule (required)
+If sudo cannot find an installation in your user PATH, use its absolute path,
+for example `sudo ~/.local/share/ulanzi-niri-venv/bin/ulanzi-niri admin-setup`.
+`admin-setup` requires root and only installs and reloads the udev rule; it does
+not change user config or services. Replug the deck if device access is not
+available immediately. The udev rule
+grants the active local desktop session access through `uaccess`.
 
-Out of the box the deck's `hidraw` nodes are owned by root. Install the udev
-rule so the daemon can talk to it as your user:
+Each setup component can be skipped independently:
 
 ```sh
-ulanzi-niri install-udev
-# follow the printed `sudo` commands; replug the deck afterwards
+ulanzi-niri setup --no-service    # config only
+ulanzi-niri setup --no-config     # use your existing config
+ulanzi-niri setup --no-start      # install service without enabling/starting it
 ```
 
-### Run as a service
+Options can be combined. `--no-service` also skips enabling and starting.
+On systems without systemd or `systemctl`, setup prints a warning and skips
+the service step successfully. Start the daemon manually with `ulanzi-niri run`.
+`--no-start` leaves an already running/enabled service in that state.
+Configuration and the user service respect `$XDG_CONFIG_HOME` (default
+`~/.config`). Setup reports errors with a nonzero exit status and can be rerun.
+The legacy `install-udev` command remains available to print manual commands.
 
-```sh
-mkdir -p ~/.config/systemd/user
-cp packaging/ulanzi-niri.service ~/.config/systemd/user/
-systemctl --user enable --now ulanzi-niri
-```
+The example uses desktop tools such as niri, kitty, firefox, playerctl, wpctl,
+and wtype; install the tools used by your chosen actions separately. Use
+`ulanzi-niri doctor` to check your environment.
 
 ## Configuration
 
@@ -188,15 +203,13 @@ Icon names in `[[page.button]]` are resolved in this order, first match
 wins:
 
 1. `~/.config/ulanzi-niri/icons/<name>` — your own overrides
-2. `<install>/assets/icons/<name>` — bundled icons (if any)
-3. `~/.local/share/icons/`, `/usr/share/icons/`, `/usr/share/pixmaps/` —
+2. `~/.local/share/icons/`, `/usr/share/icons/`, `/usr/share/pixmaps/` —
    freedesktop icon directories, searched recursively
 
 A name with an extension (`firefox.png`) matches that filename anywhere
 under the search roots. A bare name (`firefox`) matches `firefox.png` or
 `firefox.xpm`, preferring the largest available pixel size (parsed from
-`NxN` directory components). SVG icons are not currently supported — drop
-a PNG into `~/.config/ulanzi-niri/icons/` for SVG-only themes.
+`NxN` directory components). SVG icons are supported and preferred over raster matches in system themes.
 
 ## Keyboard control
 
@@ -226,11 +239,54 @@ If the daemon is not running the command exits 1 with `driver not running`.
 ## Development
 
 ```sh
+uv sync
+./bin/install --no-start         # optional local tool install + setup
 uv run ulanzi-niri doctor       # diagnose environment
 uv run ulanzi-niri push         # one-shot push of current config
 uv run ulanzi-niri sniff        # observe HID traffic
 uv run pytest                   # tests
 uv run ruff check .             # lint
+```
+
+## Releases
+
+Pushing a stable semantic version tag such as `v2.0.0` runs
+[the release workflow](.github/workflows/publish.yml). Tags must be exactly
+`vMAJOR.MINOR.PATCH`, with no leading zeroes. Prerelease and build-metadata
+tags are not published by this workflow.
+
+The first job validates the tag and requires its version (without `v`) to
+exactly match `[project].version` in `pyproject.toml`. An invalid tag or version
+mismatch fails the release before tests, builds, or publishing. After tests,
+lint, and type checks pass, the workflow builds the source distribution and
+wheel, checks the installed wheel outside the repository, publishes those
+artifacts to PyPI, and creates a GitHub Release with the distribution files.
+
+Before the first release, configure a [PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/)
+for `ulanzi-studio-niri` using these exact values:
+
+| Setting | Value |
+| --- | --- |
+| Owner | `doitian` |
+| Repository | `ulanzi-studio-niri` |
+| Workflow filename | `publish.yml` |
+| Environment | `pypi` |
+
+If the PyPI project does not exist yet, register a
+[pending publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+with the same values and project name. Configure the repository's GitHub
+Actions environment named `pypi` to allow release tags. Leave required reviewers
+disabled if releases should publish without manual approval. The publish job
+uses GitHub OIDC with `id-token: write`; no PyPI API token or password secret
+is needed.
+
+To release, update `pyproject.toml`, run `uv lock`, commit the version change
+and release workflow, then tag and push that commit. For example, when the
+committed version is `2.0.0`:
+
+```sh
+git tag -a v2.0.0 -m "Release 2.0.0"
+git push origin v2.0.0
 ```
 
 ## Status

@@ -3,15 +3,29 @@ name: Publish
 on:
   push:
     tags:
+      # GitHub tag filters are globs; the validate job enforces the exact format.
       - "v*"
+
+permissions:
+  contents: read
 
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Require a semantic version tag matching the package
+        run: python3 .github/scripts/validate_release.py
+
   test:
     name: Test before publish
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -36,6 +50,7 @@ jobs:
       - name: Run tests
         run: uv run pytest
 
+
   build:
     name: Build distribution
     needs: test
@@ -48,25 +63,21 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Verify tag matches package version
-        run: |
-          tag="${GITHUB_REF_NAME#v}"
-          pkg_version="$(uv run --no-project python -c 'import tomllib,sys; print(tomllib.loads(open("pyproject.toml","rb").read().decode())["project"]["version"])')"
-          echo "Tag version: $tag"
-          echo "Package version: $pkg_version"
-          if [ "$tag" != "$pkg_version" ]; then
-            echo "::error::Tag '$tag' does not match pyproject.toml version '$pkg_version'"
-            exit 1
-          fi
-
       - name: Build sdist and wheel
         run: uv build
+
+      - name: Verify distributions install without the repository
+        run: |
+          uv venv "$RUNNER_TEMP/release-venv"
+          uv pip install --python "$RUNNER_TEMP/release-venv/bin/python" dist/*.whl
+          "$RUNNER_TEMP/release-venv/bin/python" -I tests/packaging_smoke.py
 
       - name: Upload distribution artifacts
         uses: actions/upload-artifact@v5
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
   publish-pypi:
     name: Publish to PyPI
@@ -85,6 +96,7 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
+        # No API token: PyPI trusts this workflow and the pypi environment via OIDC.
         uses: pypa/gh-action-pypi-publish@release/v1
 
   github-release:
@@ -107,5 +119,6 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
+            --verify-tag \
             --generate-notes \
             dist/*

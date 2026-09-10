@@ -41,3 +41,10 @@ jobs:
 
       - name: Run tests
         run: uv run pytest
+
+      - name: Verify standalone installation
+        run: |
+          uv build --out-dir "$RUNNER_TEMP/release-dist"
+          uv venv "$RUNNER_TEMP/release-venv"
+          uv pip install --python "$RUNNER_TEMP/release-venv/bin/python" "$RUNNER_TEMP"/release-dist/*.whl
+          "$RUNNER_TEMP/release-venv/bin/python" -I tests/packaging_smoke.py

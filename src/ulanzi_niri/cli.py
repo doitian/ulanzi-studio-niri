@@ -68,6 +68,17 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
+    sub.add_parser("admin-setup", help="install and reload the udev rule (requires root)")
+
+    p_setup = sub.add_parser("setup", help="install user config and service; check udev setup")
+    for component in ("config", "service"):
+        p_setup.add_argument(
+            f"--no-{component}", action="store_true", help=f"skip {component} installation"
+        )
+    p_setup.add_argument(
+        "--no-start", action="store_true", help="install service without enabling or starting it"
+    )
+
     sub.add_parser("version", help="print the package version")
 
     return parser
@@ -96,6 +107,14 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_control(args)
     if cmd == "install-udev":
         return _cmd_install_udev()
+    if cmd == "admin-setup":
+        from .setup import admin_setup
+
+        return admin_setup()
+    if cmd == "setup":
+        from .setup import setup
+
+        return setup(args)
     if cmd == "version":
         return _cmd_version()
     return 2
@@ -165,7 +184,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
     cfg_path = args.config or default_config_path()
     if not cfg_path.exists():
         print(f"error: config not found at {cfg_path}", file=sys.stderr)
-        print("hint: cp examples/config.toml ~/.config/ulanzi-niri/config.toml", file=sys.stderr)
+        print("hint: run ulanzi-niri setup --no-service", file=sys.stderr)
         return 1
     asyncio.run(run_service(cfg_path))
     return 0
@@ -190,7 +209,7 @@ def _cmd_doctor(args: argparse.Namespace) -> int:
         print(f"device path:   {path!r}")
         dev = open_device()
         if dev is None:
-            print("device open:   FAILED (likely missing udev rule; run install-udev)")
+            print("device open:   FAILED (likely missing udev rule; run sudo ulanzi-niri admin-setup)")
         else:
             print("device open:   ok")
             dev.close()

@@ -22,8 +22,7 @@ def isolated_icon_search(tmp_path: Path):
     empty = tmp_path / "_empty"
     empty.mkdir()
     resolve_icon_path.cache_clear()
-    with patch("ulanzi_niri.icons._user_icons_dir", return_value=empty), \
-         patch("ulanzi_niri.icons._bundled_icons_dir", return_value=empty):
+    with patch("ulanzi_niri.icons._user_icons_dir", return_value=empty):
         yield
     resolve_icon_path.cache_clear()
 

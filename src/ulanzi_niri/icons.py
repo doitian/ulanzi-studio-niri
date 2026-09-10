@@ -47,10 +47,6 @@ def _user_icons_dir() -> Path:
     return Path(base) / "ulanzi-niri" / "icons"
 
 
-def _bundled_icons_dir() -> Path:
-    return Path(__file__).resolve().parent.parent.parent / "assets" / "icons"
-
-
 def _system_icon_roots() -> tuple[Path, ...]:
     return (
         Path.home() / ".local" / "share" / "icons",
@@ -105,8 +101,7 @@ def resolve_icon_path(name: str) -> Path | None:
     Search order (first match wins):
 
     1. ``~/.config/ulanzi-niri/icons/<name>``  (user override)
-    2. ``<install>/assets/icons/<name>``        (bundled)
-    3. Freedesktop roots, recursive: ``~/.local/share/icons``,
+    2. Freedesktop roots, recursive: ``~/.local/share/icons``,
        ``/usr/share/icons``, ``/usr/share/pixmaps``.
 
     Names containing a ``.`` are treated as literal filenames. Bare names
@@ -120,7 +115,7 @@ def resolve_icon_path(name: str) -> Path | None:
     else:
         candidates = tuple(f"{name}{ext}" for ext in _ICON_EXTENSIONS)
 
-    for base in (_user_icons_dir(), _bundled_icons_dir()):
+    for base in (_user_icons_dir(),):
         for cand in (name, *candidates):
             p = base / cand
             if p.is_file():
