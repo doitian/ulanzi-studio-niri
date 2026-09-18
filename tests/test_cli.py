@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import socket
 import threading
 from pathlib import Path
@@ -73,6 +74,7 @@ def test_usage_subcommand_parser() -> None:
     args = cli.build_parser().parse_args(["ai-usage", "--timeout", "3"])
     assert args.cmd == "ai-usage"
     assert args.timeout == 3
+    assert args.json is False
 
 
 def test_format_usage_report() -> None:
@@ -116,6 +118,27 @@ def test_usage_subcommand_fails_without_provider_data(monkeypatch, capsys) -> No
     output = capsys.readouterr().out
     assert "Claude: unavailable" in output
     assert "Codex: unavailable" in output
+
+
+@pytest.mark.parametrize(
+    ("status", "data", "exit_code"),
+    [
+        (ai_usage.FetchStatus.OK, {"providers": {"claude": _report()["providers"]["claude"]}}, 0),
+        (ai_usage.FetchStatus.ERROR, _report(), 0),
+        (ai_usage.FetchStatus.ERROR, {"providers": {"claude": {"error": "auth missing"}}}, 1),
+        (ai_usage.FetchStatus.TIMEOUT, None, 1),
+    ],
+)
+def test_usage_subcommand_json(monkeypatch, capsys, status, data, exit_code) -> None:
+    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+        assert timeout == 3
+        return ai_usage.UsageFetchResult(status, data)
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    assert cli.main(["ai-usage", "--json", "--timeout", "3"]) == exit_code
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) == data
+    assert captured.err == ""
 
 
 def test_usage_subcommand_rejects_invalid_timeout(capsys) -> None:

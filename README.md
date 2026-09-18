@@ -113,6 +113,12 @@ The same data is available in a terminal:
 ulanzi-niri ai-usage
 ```
 
+Use `ulanzi-niri ai-usage --json` for machine-readable output. It returns a
+`providers` object containing account limits and provider errors, or `null` if
+no data is available. Both formats exit with status 0 when at least one provider
+returns account data, 1 on timeout or when no provider returns account data,
+and 2 for an invalid timeout.
+
 ## Hardware
 
 - 13 LCD buttons at 196×196

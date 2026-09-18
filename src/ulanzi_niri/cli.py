@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import socket
@@ -39,6 +40,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_usage = sub.add_parser("ai-usage", help="show remaining AI plan usage")
     p_usage.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
     p_usage.add_argument("--timeout", type=float, default=20.0, help="request timeout in seconds")
+    p_usage.add_argument("--json", action="store_true", help="output usage data as JSON")
 
     p_render = sub.add_parser("render", help="render the current page to PNG files (no device)")
     _add_common(p_render)
@@ -334,7 +336,7 @@ def _cmd_usage(args: argparse.Namespace) -> int:
         return 2
     result = asyncio.run(fetch_usage(timeout=args.timeout))
     report, any_success = _format_usage_report(result.data)
-    print(report)
+    print(json.dumps(result.data, indent=2) if args.json else report)
     if result.status is FetchStatus.TIMEOUT:
         return 1
     return 0 if any_success else 1
