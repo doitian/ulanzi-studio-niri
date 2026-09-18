@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import io
 import json
@@ -945,6 +946,49 @@ async def test_usage_fetcher_refreshes_in_background(monkeypatch) -> None:
     assert fetcher._task is not None
     await fetcher._task
     assert calls == 2
+
+
+async def test_usage_refresh_waiters_share_fetch_and_cancellation(monkeypatch) -> None:
+    release = asyncio.Event()
+    started = asyncio.Event()
+    calls = 0
+    result = ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    async def fetch():
+        nonlocal calls
+        calls += 1
+        started.set()
+        await release.wait()
+        return result
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fetch)
+    fetcher = UsageFetcher()
+    first = asyncio.create_task(fetcher.refresh_and_wait())
+    await started.wait()
+    second = asyncio.create_task(fetcher.refresh_and_wait())
+    await asyncio.sleep(0)
+    first.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await first
+    assert fetcher._task is not None and not fetcher._task.done()
+    release.set()
+    assert await second == result
+    assert calls == 1
+
+
+async def test_usage_refresh_wait_replaces_pending_retry(monkeypatch) -> None:
+    fetcher = UsageFetcher()
+    fetcher._retry_task = asyncio.create_task(asyncio.sleep(3600))
+    retry = fetcher._retry_task
+
+    async def fetch():
+        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fetch)
+    result = await fetcher.refresh_and_wait()
+    assert result.status is FetchStatus.OK
+    assert retry.cancelled()
+    assert fetcher._retry_task is None
 
 
 async def test_usage_fetcher_retries_after_failure(monkeypatch) -> None:

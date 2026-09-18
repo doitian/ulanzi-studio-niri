@@ -1,4 +1,5 @@
 import asyncio
+import json
 from unittest.mock import AsyncMock, Mock
 
 import pytest
@@ -392,6 +393,126 @@ async def test_control_next_lands_on_layer_peer(monkeypatch, tmp_path):
     app = _page_service(monkeypatch, tmp_path)
     assert await app.apply_control("next") == "OK second"
     assert app._pages.name == "second"
+
+
+@pytest.mark.parametrize(
+    "cached",
+    [
+        None,
+        ai_usage.UsageFetchResult(
+            ai_usage.FetchStatus.ERROR, {"providers": {"codex": {"error": "auth missing"}}}
+        ),
+    ],
+)
+async def test_control_usage_reads_cache_without_waiting_or_refreshing(
+    monkeypatch, tmp_path, cached
+):
+    app = _page_service(monkeypatch, tmp_path, device=False)
+    app._usage = Mock()
+    app._usage.get.return_value = cached
+    async with app._page_lock:
+        reply = await asyncio.wait_for(app.apply_control("ai-usage"), timeout=0.1)
+    assert reply.startswith("OK ")
+    assert json.loads(reply[3:]) == {
+        "status": cached.status.value if cached else "error",
+        "data": cached.data if cached else None,
+    }
+    app._usage.refresh.assert_not_called()
+
+
+async def test_control_usage_socket_roundtrip(monkeypatch, tmp_path):
+    from ulanzi_niri import cli
+
+    app = _page_service(monkeypatch, tmp_path, device=False)
+    result = ai_usage.UsageFetchResult(
+        ai_usage.FetchStatus.OK,
+        {"providers": {"codex": {"accounts": [{"email": "用户@example.com", "limits": {}}]}}},
+    )
+    app._usage = Mock()
+    app._usage.get.return_value = result
+    assert await app.start_control()
+    try:
+        assert await asyncio.to_thread(cli._read_cached_usage, 1) == result
+        app._usage.refresh.assert_not_called()
+    finally:
+        await app.stop_control()
+
+
+async def test_control_refresh_usage_runs_in_background(monkeypatch, tmp_path):
+    app = _page_service(monkeypatch, tmp_path, device=False)
+    release = asyncio.Event()
+    cached = ai_usage.UsageFetchResult(ai_usage.FetchStatus.OK, {"providers": {}})
+    updated = ai_usage.UsageFetchResult(
+        ai_usage.FetchStatus.OK, {"providers": {"codex": {"accounts": []}}}
+    )
+    app._usage._result = cached
+    # Bypass the normal 30-minute TTL, but still honor the manual throttle.
+    app._usage._fetched_at = (
+        asyncio.get_running_loop().time() - ai_usage.MANUAL_REFRESH_THROTTLE_SECONDS - 1
+    )
+
+    async def fetch():
+        await release.wait()
+        return updated
+
+    fetch_mock = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(ai_usage, "fetch_usage", fetch_mock)
+    try:
+        async with app._page_lock:
+            assert await asyncio.wait_for(app.apply_control("refresh-ai-usage"), 0.1) == (
+                "OK refresh-requested"
+            )
+        task = app._usage._task
+        assert task is not None
+        assert not task.done()
+        assert app._usage.get() == cached
+        await app.apply_control("refresh-ai-usage")
+        assert app._usage._task is task
+    finally:
+        release.set()
+        if app._usage._task is not None:
+            await app._usage._task
+    assert app._usage.get() == updated
+    await app.apply_control("refresh-ai-usage")
+    fetch_mock.assert_awaited_once()
+    assert app._usage._task is task
+
+
+async def test_control_refresh_usage_waits_over_socket(monkeypatch, tmp_path):
+    from ulanzi_niri import cli
+
+    app = _page_service(monkeypatch, tmp_path, device=False)
+    started = asyncio.Event()
+    release = asyncio.Event()
+    old = ai_usage.UsageFetchResult(ai_usage.FetchStatus.OK, {"providers": {}})
+    updated = ai_usage.UsageFetchResult(
+        ai_usage.FetchStatus.OK, {"providers": {"codex": {"accounts": []}}}
+    )
+    app._usage._result = old
+    app._usage._fetched_at = asyncio.get_running_loop().time()
+
+    async def fetch():
+        started.set()
+        await release.wait()
+        return updated
+
+    fetch_mock = AsyncMock(side_effect=fetch)
+    monkeypatch.setattr(ai_usage, "fetch_usage", fetch_mock)
+    assert await app.start_control()
+    request = asyncio.create_task(asyncio.to_thread(cli._read_cached_usage, 2, refresh=True))
+    try:
+        async with app._page_lock:
+            await asyncio.wait_for(started.wait(), 1)
+            assert not request.done()
+            # Cache-only readers remain responsive while refresh readers wait.
+            assert await asyncio.to_thread(cli._read_cached_usage, 1) == old
+            release.set()
+            assert await request == updated
+        fetch_mock.assert_awaited_once()
+    finally:
+        release.set()
+        await request
+        await app.stop_control()
 
 
 async def test_control_unknown_goto_does_not_switch(monkeypatch, tmp_path):

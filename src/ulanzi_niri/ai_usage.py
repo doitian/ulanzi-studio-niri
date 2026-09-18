@@ -137,6 +137,17 @@ class UsageFetcher:
                 return
         self._task = asyncio.create_task(self._run())
 
+    async def refresh_and_wait(self) -> UsageFetchResult | None:
+        """Fetch fresh usage, joining an in-flight fetch and bypassing the cache throttle."""
+        if self._task is None or self._task.done():
+            if self._retry_task is not None:
+                self._retry_task.cancel()
+                self._retry_task = None
+            self._task = asyncio.create_task(self._run())
+        # A disconnected or cancelled caller must not cancel the daemon's refresh.
+        await asyncio.shield(self._task)
+        return self._result
+
     async def _run(self) -> None:
         result = await fetch_usage()
         self._result = result
@@ -164,7 +175,8 @@ class UsageFetcher:
     async def _retry_later(self, delay: float) -> None:
         await asyncio.sleep(delay)
         self._retry_task = None
-        await self._run()
+        self._task = asyncio.create_task(self._run())
+        await self._task
 
     async def _notify(self) -> None:
         callback = self._on_update

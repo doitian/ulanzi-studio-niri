@@ -12,10 +12,14 @@ import sys
 import time
 from importlib import resources
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .config import control_socket_path, default_config_path, load_config
 from .log import configure as configure_logging
 from .protocol.manager import find_device_path, open_device
+
+if TYPE_CHECKING:
+    from .ai_usage import UsageFetchResult
 
 log = logging.getLogger(__name__)
 
@@ -37,10 +41,18 @@ def build_parser() -> argparse.ArgumentParser:
     p_doctor = sub.add_parser("doctor", help="report environment + device status")
     _add_common(p_doctor)
 
-    p_usage = sub.add_parser("ai-usage", help="show remaining AI plan usage")
+    p_usage = sub.add_parser("ai-usage", help="show AI usage cached by the running daemon")
     p_usage.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
-    p_usage.add_argument("--timeout", type=float, default=20.0, help="request timeout in seconds")
+    p_usage.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="daemon reply timeout in seconds (default: 2, or 30 with --refresh)",
+    )
     p_usage.add_argument("--json", action="store_true", help="output usage data as JSON")
+    p_usage.add_argument(
+        "--refresh", action="store_true", help="wait for fresh usage from the daemon before printing"
+    )
 
     p_render = sub.add_parser("render", help="render the current page to PNG files (no device)")
     _add_common(p_render)
@@ -67,6 +79,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_goto = ctrl.add_parser("goto", help="jump to a named page")
     p_goto.add_argument("page")
     ctrl.add_parser("back", help="return to the previous page in history")
+    ctrl.add_parser("refresh-ai-usage", help="request a background refresh of all AI usage")
 
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
@@ -129,17 +142,19 @@ CONTROL_REPLY_TIMEOUT = 2.0
 def _cmd_control(args: argparse.Namespace) -> int:
     cmd = args.control_cmd
     if cmd == "next-page":
-        return _cmd_page("next")
+        return _send_control("next")
     if cmd == "prev-page":
-        return _cmd_page("prev")
+        return _send_control("prev")
     if cmd == "goto":
-        return _cmd_page(f"goto {args.page}")
+        return _send_control(f"goto {args.page}")
     if cmd == "back":
-        return _cmd_page("back")
+        return _send_control("back")
+    if cmd == "refresh-ai-usage":
+        return _send_control("refresh-ai-usage")
     return 2
 
 
-def _cmd_page(request: str) -> int:
+def _send_control(request: str) -> int:
     path = control_socket_path()
     if path is None:
         print("driver not running", file=sys.stderr)
@@ -174,6 +189,9 @@ def _cmd_page(request: str) -> int:
         return 1
     if reply == "ERR no-device":
         print("device not connected", file=sys.stderr)
+        return 1
+    if reply == "ERR unknown":
+        print("command not supported; restart the daemon after upgrading", file=sys.stderr)
         return 1
     print("driver busy", file=sys.stderr)
     return 1
@@ -328,13 +346,51 @@ def _format_usage_report(data: dict | None) -> tuple[str, bool]:
     return "\n\n".join(sections), any_success
 
 
-def _cmd_usage(args: argparse.Namespace) -> int:
-    from .ai_usage import FetchStatus, fetch_usage
+def _read_cached_usage(timeout: float, *, refresh: bool = False) -> UsageFetchResult:
+    from .ai_usage import FetchStatus, UsageFetchResult
 
-    if args.timeout <= 0:
+    path = control_socket_path()
+    if path is None:
+        raise RuntimeError("driver not running")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(CONTROL_CONNECT_TIMEOUT)
+            sock.connect(str(path))
+            sock.settimeout(timeout)
+            sock.sendall(b"ai-usage --refresh\n" if refresh else b"ai-usage\n")
+            sock.shutdown(socket.SHUT_WR)
+            with sock.makefile(encoding="utf-8") as stream:
+                reply = stream.readline()
+    except TimeoutError as exc:
+        raise RuntimeError("driver busy") from exc
+    except OSError as exc:
+        raise RuntimeError("driver not running") from exc
+    if reply.strip() == "ERR unknown":
+        raise RuntimeError("restart the daemon to enable cached AI usage")
+    try:
+        if not reply.startswith("OK "):
+            raise ValueError("unexpected reply")
+        payload = json.loads(reply[3:])
+        data = payload["data"]
+        if data is not None and not isinstance(data, dict):
+            raise ValueError("invalid usage data")
+        return UsageFetchResult(FetchStatus(payload["status"]), data)
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("invalid usage response from daemon") from exc
+
+
+def _cmd_usage(args: argparse.Namespace) -> int:
+    from .ai_usage import FetchStatus, UsageFetchResult
+
+    timeout = args.timeout if args.timeout is not None else (30.0 if args.refresh else 2.0)
+    if timeout <= 0:
         print("timeout must be greater than zero", file=sys.stderr)
         return 2
-    result = asyncio.run(fetch_usage(timeout=args.timeout))
+    try:
+        result = _read_cached_usage(timeout=timeout, refresh=args.refresh)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        result = UsageFetchResult(FetchStatus.ERROR)
     report, any_success = _format_usage_report(result.data)
     print(json.dumps(result.data, indent=2) if args.json else report)
     if result.status is FetchStatus.TIMEOUT:

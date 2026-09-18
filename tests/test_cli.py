@@ -92,17 +92,18 @@ def test_format_usage_report() -> None:
 
 
 def test_usage_subcommand_prints_partial_success(monkeypatch, capsys) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    def fake_read(timeout: float, *, refresh: bool) -> ai_usage.UsageFetchResult:
         assert timeout == 3
+        assert refresh is False
         return ai_usage.UsageFetchResult(ai_usage.FetchStatus.ERROR, _report())
 
-    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(cli, "_read_cached_usage", fake_read)
     assert cli.main(["ai-usage", "--timeout", "3"]) == 0
     assert "82.5% remaining" in capsys.readouterr().out
 
 
 def test_usage_subcommand_fails_without_provider_data(monkeypatch, capsys) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    def fake_read(timeout: float, *, refresh: bool) -> ai_usage.UsageFetchResult:
         return ai_usage.UsageFetchResult(
             ai_usage.FetchStatus.ERROR,
             {
@@ -113,7 +114,7 @@ def test_usage_subcommand_fails_without_provider_data(monkeypatch, capsys) -> No
             },
         )
 
-    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(cli, "_read_cached_usage", fake_read)
     assert cli.main(["ai-usage"]) == 1
     output = capsys.readouterr().out
     assert "Claude: unavailable" in output
@@ -130,11 +131,11 @@ def test_usage_subcommand_fails_without_provider_data(monkeypatch, capsys) -> No
     ],
 )
 def test_usage_subcommand_json(monkeypatch, capsys, status, data, exit_code) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    def fake_read(timeout: float, *, refresh: bool) -> ai_usage.UsageFetchResult:
         assert timeout == 3
         return ai_usage.UsageFetchResult(status, data)
 
-    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(cli, "_read_cached_usage", fake_read)
     assert cli.main(["ai-usage", "--json", "--timeout", "3"]) == exit_code
     captured = capsys.readouterr()
     assert json.loads(captured.out) == data
@@ -144,6 +145,50 @@ def test_usage_subcommand_json(monkeypatch, capsys, status, data, exit_code) -> 
 def test_usage_subcommand_rejects_invalid_timeout(capsys) -> None:
     assert cli.main(["ai-usage", "--timeout", "0"]) == 2
     assert "timeout must be greater than zero" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("extra,expected_timeout", [([], 30.0), (["--timeout", "5"], 5.0)])
+def test_usage_refresh_wait_timeout(monkeypatch, capsys, extra, expected_timeout) -> None:
+    def fake_read(timeout, *, refresh):
+        assert timeout == expected_timeout
+        assert refresh is True
+        return ai_usage.UsageFetchResult(ai_usage.FetchStatus.OK, _report())
+
+    monkeypatch.setattr(cli, "_read_cached_usage", fake_read)
+    assert cli.main(["ai-usage", "--refresh", "--json", *extra]) == 0
+    assert json.loads(capsys.readouterr().out) == _report()
+
+
+def test_usage_without_daemon_does_not_fetch(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+
+    async def unexpected_fetch(*args, **kwargs):
+        raise AssertionError("CLI must not fetch provider data")
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", unexpected_fetch)
+    assert cli.main(["ai-usage", "--json"]) == 1
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) is None
+    assert captured.err == "driver not running\n"
+
+
+@pytest.mark.parametrize(
+    ("reply", "message"),
+    [
+        ("ERR unknown", "restart the daemon to enable cached AI usage"),
+        ("OK broken", "invalid usage response from daemon"),
+        ('OK {"status": "invalid", "data": null}', "invalid usage response from daemon"),
+        ('OK {"status": "ok", "data": []}', "invalid usage response from daemon"),
+    ],
+)
+def test_usage_invalid_daemon_reply(monkeypatch, tmp_path, capsys, reply, message) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    thread = _serve_one_reply(tmp_path / "ulanzi-niri.sock", reply)
+    assert cli.main(["ai-usage", "--json"]) == 1
+    thread.join(timeout=2)
+    captured = capsys.readouterr()
+    assert json.loads(captured.out) is None
+    assert captured.err.strip() == message
 
 
 def test_version_subcommand(capsys) -> None:
@@ -156,6 +201,16 @@ def test_goto_parser_accepts_page() -> None:
     assert args.cmd == "control"
     assert args.control_cmd == "goto"
     assert args.page == "apps"
+
+
+def test_refresh_ai_usage_control(monkeypatch, tmp_path, capsys) -> None:
+    monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path))
+    thread = _serve_one_reply(
+        tmp_path / "ulanzi-niri.sock", "OK refresh-requested", expected="refresh-ai-usage"
+    )
+    assert cli.main(["control", "refresh-ai-usage"]) == 0
+    thread.join(timeout=2)
+    assert capsys.readouterr().out == "refresh-requested\n"
 
 
 def test_goto_without_page_is_usage_error() -> None:
@@ -172,7 +227,7 @@ def test_next_page_without_socket(monkeypatch, tmp_path, capsys) -> None:
     assert captured.err == "driver not running\n"
 
 
-def _serve_one_reply(path: Path, reply: str) -> threading.Thread:
+def _serve_one_reply(path: Path, reply: str, *, expected: str | None = None) -> threading.Thread:
     ready = threading.Event()
 
     def run() -> None:
@@ -181,7 +236,9 @@ def _serve_one_reply(path: Path, reply: str) -> threading.Thread:
         srv.listen(1)
         ready.set()
         conn, _ = srv.accept()
-        conn.recv(256)
+        request = conn.recv(256)
+        if expected is not None:
+            assert request == (expected + "\n").encode()
         conn.sendall((reply + "\n").encode())
         conn.close()
         srv.close()

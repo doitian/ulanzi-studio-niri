@@ -107,7 +107,7 @@ HTTP 429 responses are not retried automatically. Press any usage widget to
 request a manual refresh. Manual refreshes are throttled to one fetch every
 90 seconds.
 
-The same data is available in a terminal:
+The same cached data is available immediately from the running daemon:
 
 ```sh
 ulanzi-niri ai-usage
@@ -115,9 +115,31 @@ ulanzi-niri ai-usage
 
 Use `ulanzi-niri ai-usage --json` for machine-readable output. It returns a
 `providers` object containing account limits and provider errors, or `null` if
-no data is available. Both formats exit with status 0 when at least one provider
+no data is available. The command reads the daemon's in-memory cache without
+contacting providers or waiting for an in-progress refresh. Restart the daemon
+after upgrading to enable this command. `--timeout` controls how long to wait
+for the daemon's reply (default: 2 seconds).
+Use `ulanzi-niri ai-usage --refresh --json` to wait for a fresh result before
+printing. This bypasses the cache and manual-refresh throttle, joins any fetch
+already in progress, and defaults to a 30-second reply timeout. If the CLI
+times out, the daemon continues refreshing its cache.
+Both formats exit with status 0 when at least one provider
 returns account data, 1 on timeout or when no provider returns account data,
-and 2 for an invalid timeout.
+including when the daemon is not running, and 2 for an invalid timeout.
+
+Request a background refresh of all providers, regardless of the current page:
+
+```sh
+ulanzi-niri control refresh-ai-usage
+```
+
+This returns `refresh-requested` immediately. It shares the widget's 90-second
+manual-refresh throttle and does not start another fetch while one is running.
+Read the updated cache with `ulanzi-niri ai-usage --json` after the refresh
+finishes; reading while it is running returns the previous result.
+The raw control socket request is `refresh-ai-usage\n`, sent to
+`$XDG_RUNTIME_DIR/ulanzi-niri.sock`; its reply is `OK refresh-requested\n`.
+For a refresh followed by its result, send `ai-usage --refresh\n` instead.
 
 ## Hardware
 

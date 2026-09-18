@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import socket
 from dataclasses import dataclass
@@ -118,6 +119,20 @@ class Service:
         self._control_path = None
 
     async def apply_control(self, line: str) -> str:
+        if line == "refresh-ai-usage":
+            self._usage.refresh(force=True)
+            return "OK refresh-requested"
+        if line in {"ai-usage", "ai-usage --refresh"}:
+            result = (
+                await self._usage.refresh_and_wait()
+                if line == "ai-usage --refresh"
+                else self._usage.get()
+            )
+            return "OK " + json.dumps(
+                {"status": result.status.value, "data": result.data}
+                if result is not None
+                else {"status": "error", "data": None}
+            )
         async with self._page_lock:
             return await self._apply_control_locked(line)
 
