@@ -6,6 +6,7 @@ import asyncio
 import base64
 import io
 import json
+from datetime import UTC, datetime
 
 import pytest
 from PIL import Image, ImageDraw
@@ -133,6 +134,28 @@ PROVIDERS = {
             }
         ]
     },
+    "kimi-code": {
+        "accounts": [
+            {
+                "email": "",
+                "active": True,
+                "limits": {
+                    "five_hour": {
+                        "used_percent": 16,
+                        "remaining_percent": 84,
+                        "resets_at": "2026-09-02T05:00:00+00:00",
+                        "reset_after_seconds": 3600,
+                    },
+                    "monthly": {
+                        "used_percent": 20,
+                        "remaining_percent": 80,
+                        "resets_at": "2026-10-01T00:00:00+00:00",
+                        "reset_after_seconds": 2000000,
+                    },
+                },
+            }
+        ]
+    },
 }
 
 
@@ -181,6 +204,8 @@ def test_default_labels() -> None:
     assert _default_label(UsageWidget(pos=1, provider="opencode-go", limit="monthly")) == "30D"
     assert _default_label(UsageWidget(pos=1, provider="moonshot", limit="balance")) == "BAL"
     assert _default_label(UsageWidget(pos=1, provider="xai", limit="weekly")) == "7D"
+    assert _default_label(UsageWidget(pos=1, provider="kimi-code", limit="five_hour")) == "5H"
+    assert _default_label(UsageWidget(pos=1, provider="kimi-code", limit="monthly")) == "30D"
 
 
 def test_resolve_limit_missing() -> None:
@@ -409,6 +434,7 @@ async def test_fetch_usage_combines_providers(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
     monkeypatch.setattr(ai_usage, "_fetch_xai", lambda _timeout: PROVIDERS["xai"])
+    monkeypatch.setattr(ai_usage, "_fetch_kimi_code", lambda _timeout: PROVIDERS["kimi-code"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.OK
     assert result.data == {"providers": PROVIDERS}
@@ -425,6 +451,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", lambda _timeout: PROVIDERS["opencode-go"])
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", lambda _timeout: PROVIDERS["moonshot"])
     monkeypatch.setattr(ai_usage, "_fetch_xai", lambda _timeout: PROVIDERS["xai"])
+    monkeypatch.setattr(ai_usage, "_fetch_kimi_code", lambda _timeout: PROVIDERS["kimi-code"])
     result = await ai_usage.fetch_usage()
     assert result.status is FetchStatus.ERROR
     assert result.data == {
@@ -434,6 +461,7 @@ async def test_fetch_usage_preserves_provider_error(monkeypatch) -> None:
             "opencode-go": PROVIDERS["opencode-go"],
             "moonshot": PROVIDERS["moonshot"],
             "xai": PROVIDERS["xai"],
+            "kimi-code": PROVIDERS["kimi-code"],
         }
     }
 
@@ -793,6 +821,270 @@ def test_fetch_xai_missing_credentials(monkeypatch, tmp_path) -> None:
     assert "error" in provider
 
 
+KIMI_USAGE = {
+    "usages": {
+        "limit_5h": {"used_ratio": 0.16, "reset_time": "2099-03-18T17:00:00Z"},
+        "limit_month_total": {"used_ratio": 0.2, "reset_time": "2099-04-01T00:00:00Z"},
+    },
+    "limits": [
+        {
+            "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+            "detail": {
+                "limit": "100",
+                "used": "16",
+                "remaining": "84",
+                "resetTime": "2099-03-18T12:00:00.123456789Z",
+            },
+        },
+        {
+            "window": {"duration": 10, "timeUnit": "TIME_UNIT_DAY"},
+            "detail": {"limit": 10, "used": 5, "reset_in": 3600},
+        },
+    ],
+}
+
+
+def test_kimi_code_limits() -> None:
+    limits = ai_usage._kimi_code_limits(KIMI_USAGE)
+
+    assert limits["five_hour"]["remaining_percent"] == 84
+    assert limits["five_hour"]["resets_at"] == "2099-03-18T17:00:00+00:00"
+    assert limits["monthly"]["remaining_percent"] == 80
+    # The 300-minute windowed row matches five_hour but does not replace the plan quota.
+    assert limits["window_864000s"]["remaining_percent"] == 50
+
+
+def test_kimi_code_limits_drops_malformed_rows() -> None:
+    assert ai_usage._kimi_code_limits({}) == {}
+    assert (
+        ai_usage._kimi_code_limits(
+            {"usages": {"limit_5h": {"used_ratio": "x", "reset_time": "2030-01-01"}}}
+        )
+        == {}
+    )
+    assert ai_usage._kimi_code_limits({"usages": {"limit_5h": {"used_ratio": 0.4}}}) == {}
+    assert ai_usage._kimi_code_limits({"limits": [{"detail": {"limit": 10, "used": 5}}]}) == {}
+    assert (
+        ai_usage._kimi_code_limits(
+            {
+                "limits": [
+                    {
+                        "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                        "detail": {"limit": "", "used": 5, "resetTime": "2030-01-01"},
+                    }
+                ]
+            }
+        )
+        == {}
+    )
+    clamped = ai_usage._kimi_code_limits(
+        {"usages": {"limit_month_total": {"used_ratio": 1.5, "reset_time": "2030-01-01"}}}
+    )
+    assert clamped["monthly"]["remaining_percent"] == 0
+    window = ai_usage._kimi_code_limits(
+        {
+            "limits": [
+                {
+                    "window": {"duration": 300, "timeUnit": "TIME_UNIT_MINUTE"},
+                    "detail": {"limit": "100", "remaining": "40", "resetTime": "2030-01-01"},
+                }
+            ]
+        }
+    )
+    assert window["five_hour"]["remaining_percent"] == 40
+
+
+def test_kimi_cli_credentials_path(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(tmp_path / "custom.json"))
+    assert ai_usage._kimi_cli_credentials_path() == tmp_path / "custom.json"
+    monkeypatch.delenv("ULANZI_KIMI_CODE_CREDENTIALS")
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path / "kimi"))
+    assert ai_usage._kimi_cli_credentials_path() == tmp_path / "kimi" / "credentials" / "kimi-code.json"
+
+
+def test_fetch_kimi_code_with_cli_credentials(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "kimi-code.json"
+    path.write_text(
+        json.dumps(
+            {
+                "access_token": "kimi-access",
+                "refresh_token": "kimi-refresh",
+                "expires_at": datetime.now(UTC).timestamp() + 3600,
+            }
+        )
+    )
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(path))
+    requested = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json_retry_unauthorized",
+        lambda url, token, *_args, **_kwargs: requested.append((url, token)) or KIMI_USAGE,
+    )
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert requested == [("https://api.kimi.com/coding/v1/usages", "kimi-access")]
+    limits = provider["accounts"][0]["limits"]
+    assert limits["five_hour"]["remaining_percent"] == 84
+    assert limits["monthly"]["remaining_percent"] == 80
+
+
+def test_kimi_cli_refreshes_expired_token(monkeypatch, tmp_path) -> None:
+    (tmp_path / "device_id").write_text("device-123")
+    monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path))
+    credential = {
+        "access_token": "old-access",
+        "refresh_token": "old-refresh",
+        "expires_at": 1,
+        "expires_in": 3600,
+        "preserved": True,
+    }
+    captured = {}
+
+    def refresh(_url, _client_id, refresh_token, _timeout, *, extra_headers=None):
+        captured["refresh_token"] = refresh_token
+        captured["headers"] = extra_headers
+        return {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+
+    written = []
+    monkeypatch.setattr(ai_usage, "_refresh_token", refresh)
+    monkeypatch.setattr(
+        ai_usage, "_write_json_atomic", lambda _path, value, **_kwargs: written.append(value)
+    )
+
+    token = ai_usage._kimi_cli_access_token(tmp_path / "credentials" / "kimi-code.json", credential, 5)
+
+    assert token == "new-access"
+    assert captured["refresh_token"] == "old-refresh"
+    assert captured["headers"]["X-Msh-Device-Id"] == "device-123"
+    assert credential["refresh_token"] == "new-refresh"
+    assert credential["preserved"] is True
+    assert written == [credential]
+
+
+def test_fetch_kimi_code_falls_back_to_pi(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(tmp_path / "missing.json"))
+    pi_auth = tmp_path / "pi-auth.json"
+    pi_auth.write_text(
+        json.dumps(
+            {
+                "kimi-coding": {
+                    "type": "oauth",
+                    "access": "pi-access",
+                    "refresh": "pi-refresh",
+                    "expires": int((datetime.now(UTC).timestamp() + 3600) * 1000),
+                }
+            }
+        )
+    )
+    monkeypatch.setenv("ULANZI_PI_AUTH", str(pi_auth))
+    requested = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json_retry_unauthorized",
+        lambda url, token, *_args, **_kwargs: requested.append((url, token)) or KIMI_USAGE,
+    )
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert requested == [("https://api.kimi.com/coding/v1/usages", "pi-access")]
+    assert provider["accounts"][0]["limits"]["five_hour"]["remaining_percent"] == 84
+
+
+def test_kimi_pi_access_token_preserves_other_entries(monkeypatch, tmp_path) -> None:
+    xai_entry = {"type": "oauth", "access": "keep-xai", "refresh": "keep-xai-refresh"}
+    credential = {
+        "kimi-coding": {"type": "oauth", "access": "old-access", "refresh": "old-refresh", "expires": 1},
+        "xai": xai_entry,
+    }
+    monkeypatch.setattr(
+        ai_usage,
+        "_refresh_token",
+        lambda *_args, **_kwargs: {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_in": 3600,
+        },
+    )
+    written = []
+    monkeypatch.setattr(
+        ai_usage, "_write_json_atomic", lambda _path, value, **_kwargs: written.append(value)
+    )
+
+    token = ai_usage._kimi_pi_access_token(tmp_path / "auth.json", credential, 5)
+
+    assert token == "new-access"
+    assert credential["kimi-coding"]["refresh"] == "new-refresh"
+    assert credential["kimi-coding"]["expires"] > datetime.now(UTC).timestamp() * 1000
+    assert credential["xai"] == xai_entry
+    assert written == [credential]
+
+
+def test_fetch_kimi_code_falls_back_to_opencode_api_key(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("ULANZI_PI_AUTH", str(tmp_path / "missing-pi.json"))
+    auth_dir = tmp_path / "opencode"
+    auth_dir.mkdir()
+    (auth_dir / "auth.json").write_text(
+        json.dumps({"kimi-code-plan-cn": {"type": "api", "key": "cn-key"}})
+    )
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    requested = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json",
+        lambda url, token, _timeout, **_kwargs: requested.append((url, token)) or KIMI_USAGE,
+    )
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert requested == [("https://api.kimi.com/coding/v1/usages", "cn-key")]
+    assert provider["accounts"][0]["limits"]["monthly"]["remaining_percent"] == 80
+
+
+def test_fetch_kimi_code_global_api_key_uses_global_base_url(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("ULANZI_PI_AUTH", str(tmp_path / "missing-pi.json"))
+    auth_dir = tmp_path / "opencode"
+    auth_dir.mkdir()
+    (auth_dir / "auth.json").write_text(
+        json.dumps({"kimi-code-plan-global": {"type": "api", "key": "global-key"}})
+    )
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    requested = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_request_json",
+        lambda url, token, _timeout, **_kwargs: requested.append((url, token)) or KIMI_USAGE,
+    )
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert requested == [("https://api.kimi.ai/coding/v1/usages", "global-key")]
+    assert "accounts" in provider
+
+
+def test_fetch_kimi_code_missing_credentials(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(tmp_path / "missing.json"))
+    monkeypatch.setenv("ULANZI_PI_AUTH", str(tmp_path / "missing-pi.json"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert provider["error"].startswith("auth missing")
+
+
+def test_fetch_kimi_code_requires_usage_windows(monkeypatch, tmp_path) -> None:
+    path = tmp_path / "kimi-code.json"
+    path.write_text(json.dumps({"access_token": "kimi-access", "expires_at": 0}))
+    monkeypatch.setenv("ULANZI_KIMI_CODE_CREDENTIALS", str(path))
+    monkeypatch.setattr(ai_usage, "_request_json_retry_unauthorized", lambda *_a, **_kw: {})
+
+    provider = ai_usage._fetch_kimi_code(5)
+
+    assert provider == {"error": "request failed: kimi code usage response has no recognized windows"}
+
+
 def test_codex_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     payload = base64.urlsafe_b64encode(b'{"exp":1}').rstrip(b"=").decode()
     credential = {
@@ -903,6 +1195,7 @@ async def test_fetch_usage_timeout(monkeypatch) -> None:
     monkeypatch.setattr(ai_usage, "_fetch_opencode_go", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_moonshot", timed_out)
     monkeypatch.setattr(ai_usage, "_fetch_xai", timed_out)
+    monkeypatch.setattr(ai_usage, "_fetch_kimi_code", timed_out)
     result = await ai_usage.fetch_usage(timeout=0.1)
     assert result.status is FetchStatus.TIMEOUT
     assert result.data is None

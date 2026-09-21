@@ -426,6 +426,38 @@ def test_widget_xai_rejects_other_limits() -> None:
         )
 
 
+def test_widget_kimi_code_limits() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "kimi-code"
+        limit = "five_hour"
+        [[page.widget]]
+        pos = 2
+        provider = "kimi-code"
+        limit = "monthly"
+        """
+    )
+    assert [widget.limit for widget in cfg.page[0].widget] == ["five_hour", "monthly"]
+
+
+def test_widget_kimi_code_rejects_other_limits() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "kimi-code"
+            limit = "seven_day"
+            """
+        )
+
+
 def test_encoder_press_rotate_actions_parse() -> None:
     cfg = _load(
         """

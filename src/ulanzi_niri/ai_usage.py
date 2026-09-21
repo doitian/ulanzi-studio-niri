@@ -1,4 +1,4 @@
-"""Fetch and render Claude, Codex, OpenCode Go, xAI, and Moonshot usage for D200X buttons.
+"""Fetch and render Claude, Codex, OpenCode Go, Kimi Code, xAI, and Moonshot usage for D200X buttons.
 
 Provider credentials are read from the files maintained by their CLIs. Usage
 is fetched directly from each provider without an additional command-line
@@ -77,6 +77,11 @@ _MOONSHOT_BALANCE_URL_AI = "https://api.moonshot.ai/v1/users/me/balance"
 _MOONSHOT_BALANCE_URL_CN = "https://api.moonshot.cn/v1/users/me/balance"
 _XAI_USAGE_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
 _XAI_TOKEN_URL = "https://auth.x.ai/oauth2/token"
+_KIMI_CODE_TOKEN_URL = "https://auth.kimi.com/api/oauth/token"
+_KIMI_CODE_CLIENT_ID = "17e5f671-d194-4dfb-9706-5516cb48c098"
+_KIMI_CODE_BASE_URL = "https://api.kimi.com/coding/v1"
+_KIMI_CODE_GLOBAL_BASE_URL = "https://api.kimi.ai/coding/v1"
+_KIMI_USAGE_KEYS = {"limit_5h": "five_hour", "limit_month_total": "monthly"}
 # (green, yellow) minimum available balance; below yellow the widget turns red
 _MOONSHOT_BALANCE_THRESHOLDS = {"USD": (12.0, 6.0), "CNY": (70.0, 36.0)}
 _CURRENCY_SYMBOLS = {"USD": "$", "CNY": "¥"}
@@ -195,9 +200,10 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
         asyncio.to_thread(_fetch_opencode_go, timeout),
         asyncio.to_thread(_fetch_moonshot, timeout),
         asyncio.to_thread(_fetch_xai, timeout),
+        asyncio.to_thread(_fetch_kimi_code, timeout),
     ]
     try:
-        claude, codex, opencode_go, moonshot, xai = await asyncio.wait_for(
+        claude, codex, opencode_go, moonshot, xai, kimi_code = await asyncio.wait_for(
             asyncio.gather(*tasks), timeout=timeout + 1
         )
     except TimeoutError:
@@ -210,6 +216,7 @@ async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
         "opencode-go": opencode_go,
         "moonshot": moonshot,
         "xai": xai,
+        "kimi-code": kimi_code,
     }
     status = (
         FetchStatus.ERROR
@@ -265,15 +272,24 @@ def _request_json(
     return value
 
 
-def _post_form_json(url: str, values: dict[str, str], timeout: float) -> dict:
+def _post_form_json(
+    url: str,
+    values: dict[str, str],
+    timeout: float,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> dict:
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": "ulanzi-niri/1.0",
+    }
+    if extra_headers:
+        headers.update(extra_headers)
     request = Request(
         url,
         data=urlencode(values).encode(),
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "User-Agent": "ulanzi-niri/1.0",
-        },
+        headers=headers,
         method="POST",
     )
     try:
@@ -329,13 +345,21 @@ def _jwt_claim(token: str, claim: str) -> object | None:
     return claims.get(claim) if isinstance(claims, dict) else None
 
 
-def _refresh_token(url: str, client_id: str, refresh_token: str, timeout: float) -> dict:
+def _refresh_token(
+    url: str,
+    client_id: str,
+    refresh_token: str,
+    timeout: float,
+    *,
+    extra_headers: dict[str, str] | None = None,
+) -> dict:
     if not refresh_token:
         raise RuntimeError("credential expired and no refresh token is available; log in again")
     result = _post_form_json(
         url,
         {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
         timeout,
+        extra_headers=extra_headers,
     )
     if not isinstance(result.get("access_token"), str) or not result["access_token"]:
         raise RuntimeError(f"refresh response from {url} is missing access_token")
@@ -727,6 +751,262 @@ def _fetch_xai(timeout: float) -> dict:
         return {"accounts": [_account(email if isinstance(email, str) else "", limits)]}
     except (RuntimeError, TypeError, ValueError) as exc:
         log.warning("xAI usage fetch failed: %s", exc)
+        return _provider_error(str(exc))
+
+
+def _kimi_share_dir() -> Path:
+    override = os.environ.get("KIMI_SHARE_DIR", "").strip()
+    return Path(override).expanduser() if override else Path.home() / ".kimi"
+
+
+def _kimi_cli_credentials_path() -> Path:
+    override = os.environ.get("ULANZI_KIMI_CODE_CREDENTIALS", "").strip()
+    if override:
+        return Path(override).expanduser()
+    return _kimi_share_dir() / "credentials" / "kimi-code.json"
+
+
+def _pi_auth_path() -> Path:
+    override = os.environ.get("ULANZI_PI_AUTH", "").strip()
+    if override:
+        return Path(override).expanduser()
+    agent_dir = os.environ.get("PI_CODING_AGENT_DIR", "").strip()
+    root = Path(agent_dir).expanduser() if agent_dir else Path.home() / ".pi" / "agent"
+    return root / "auth.json"
+
+
+def _kimi_cli_headers() -> dict[str, str]:
+    """Platform headers expected by the Kimi auth endpoint for CLI credentials."""
+    headers = {"X-Msh-Platform": "kimi_cli"}
+    try:
+        device_id = (_kimi_share_dir() / "device_id").read_text().strip()
+    except OSError:
+        device_id = ""
+    if device_id:
+        headers["X-Msh-Device-Id"] = device_id
+    return headers
+
+
+def _kimi_cli_access_token(
+    path: Path, credential: dict, timeout: float, *, force_refresh: bool = False
+) -> str:
+    token = credential.get("access_token")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("kimi code token not found — run `/login` inside Kimi CLI")
+    expires_at = credential.get("expires_at")
+    if not isinstance(expires_at, (int, float)):
+        expires_at = 0
+    if force_refresh or (
+        expires_at and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
+    ):
+        original = copy.deepcopy(credential)
+        refreshed = _refresh_token(
+            _KIMI_CODE_TOKEN_URL,
+            _KIMI_CODE_CLIENT_ID,
+            str(credential.get("refresh_token", "")),
+            timeout,
+            extra_headers=_kimi_cli_headers(),
+        )
+        credential["access_token"] = refreshed["access_token"]
+        if isinstance(refreshed.get("refresh_token"), str) and refreshed["refresh_token"]:
+            credential["refresh_token"] = refreshed["refresh_token"]
+        expires_in = float(refreshed.get("expires_in", 0) or 0)
+        credential["expires_in"] = expires_in
+        credential["expires_at"] = (
+            datetime.now(UTC).timestamp() + expires_in if expires_in > 0 else 0
+        )
+        _write_json_atomic(path, credential, expected=original)
+        token = str(credential["access_token"])
+    return token
+
+
+def _kimi_pi_access_token(
+    path: Path, credential: dict, timeout: float, *, force_refresh: bool = False
+) -> str:
+    entry = credential.get("kimi-coding")
+    if not isinstance(entry, dict) or entry.get("type") != "oauth":
+        raise RuntimeError("kimi-coding OAuth token not found — log in to Kimi for Coding in pi")
+    token = entry.get("access")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("kimi-coding OAuth token not found — log in to Kimi for Coding in pi")
+    expires = entry.get("expires")
+    if not isinstance(expires, (int, float)):
+        expires = 0
+    now_ms = datetime.now(UTC).timestamp() * 1000
+    if force_refresh or (expires and expires <= now_ms + _REFRESH_SKEW_SECONDS * 1000):
+        original = copy.deepcopy(credential)
+        refreshed = _refresh_token(
+            _KIMI_CODE_TOKEN_URL, _KIMI_CODE_CLIENT_ID, str(entry.get("refresh", "")), timeout
+        )
+        entry["access"] = refreshed["access_token"]
+        if isinstance(refreshed.get("refresh_token"), str) and refreshed["refresh_token"]:
+            entry["refresh"] = refreshed["refresh_token"]
+        expires_in = float(refreshed.get("expires_in", 0) or 0)
+        if expires_in > 0:
+            entry["expires"] = int(now_ms + expires_in * 1000)
+        _write_json_atomic(path, credential, expected=original)
+        token = str(entry["access"])
+    return token
+
+
+def _kimi_code_api_key() -> tuple[str, str]:
+    """Resolve a Kimi Code API key saved by OpenCode `/connect` to (key, base URL)."""
+    data_home = os.environ.get("XDG_DATA_HOME", "").strip()
+    root = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
+    auth = _read_json(root / "opencode" / "auth.json")
+    for name, base in (
+        ("kimi-code-plan-cn", _KIMI_CODE_BASE_URL),
+        ("kimi-code-plan-global", _KIMI_CODE_GLOBAL_BASE_URL),
+    ):
+        credential = auth.get(name)
+        if not isinstance(credential, dict):
+            continue
+        key = credential.get("key")
+        if credential.get("type") == "api" and isinstance(key, str) and key:
+            return key, base
+    raise RuntimeError(
+        "kimi code token not found — run `/login` inside Kimi CLI or `/connect` in `opencode`"
+    )
+
+
+def _kimi_code_usages_url() -> str:
+    base = os.environ.get("KIMI_CODE_BASE_URL", "").strip() or _KIMI_CODE_BASE_URL
+    return f"{base.rstrip('/')}/usages"
+
+
+def _kimi_code_oauth_usage(path: Path, resolve_token: Callable[..., str], timeout: float) -> dict:
+    credential = _read_json(path)
+    token = resolve_token(path, credential, timeout)
+    return _request_json_retry_unauthorized(
+        _kimi_code_usages_url(),
+        token,
+        timeout,
+        lambda: resolve_token(path, credential, timeout, force_refresh=True),
+    )
+
+
+def _kimi_code_usage(timeout: float) -> dict:
+    """Fetch Kimi Code usage, trying Kimi CLI, pi, then OpenCode credentials."""
+    for resolve_path, resolve_token in (
+        (_kimi_cli_credentials_path, _kimi_cli_access_token),
+        (_pi_auth_path, _kimi_pi_access_token),
+    ):
+        try:
+            return _kimi_code_oauth_usage(resolve_path(), resolve_token, timeout)
+        except RuntimeError as exc:
+            if "token not found" not in str(exc):
+                raise
+    key, base = _kimi_code_api_key()
+    return _request_json(f"{base}/usages", key, timeout)
+
+
+def _kimi_number(value: object) -> float | None:
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return None
+        try:
+            value = float(value)
+        except ValueError:
+            return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    return float(value)
+
+
+def _kimi_code_reset(data: dict) -> float | None:
+    """Reset time as epoch seconds, from an absolute timestamp or a countdown."""
+    for key in ("reset_at", "resetAt", "reset_time", "resetTime"):
+        value = data.get(key)
+        if value is None:
+            continue
+        timestamp: float | None = None
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            timestamp = float(value)
+        elif isinstance(value, str):
+            try:
+                timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            except ValueError:
+                timestamp = None
+        if timestamp is not None:
+            return timestamp
+        break
+    for key in ("reset_in", "resetIn", "ttl"):
+        seconds = _kimi_number(data.get(key))
+        if seconds is not None and seconds > 0:
+            return datetime.now(UTC).timestamp() + seconds
+    return None
+
+
+def _kimi_code_window_seconds(*sources: dict) -> float:
+    for source in sources:
+        duration = _kimi_number(source.get("duration"))
+        if duration is None or duration <= 0:
+            continue
+        unit = str(source.get("timeUnit", "")).upper()
+        factor = (
+            60 if "MINUTE" in unit else 3600 if "HOUR" in unit else 86400 if "DAY" in unit else 1
+        )
+        return duration * factor
+    return 0
+
+
+def _kimi_code_limits(data: dict) -> dict:
+    """Normalize a Kimi Code usages response into usage windows.
+
+    Plan quotas live under ``usages`` as ``{used_ratio, reset_time}`` entries;
+    additional windowed quotas are rows in ``limits`` with a ``window``
+    duration and a ``detail`` of ``{limit, used | remaining, resetTime}``.
+    """
+    limits: dict[str, dict] = {}
+    usages = data.get("usages")
+    if isinstance(usages, dict):
+        for name, key in _KIMI_USAGE_KEYS.items():
+            entry = usages.get(name)
+            if not isinstance(entry, dict):
+                continue
+            ratio = _kimi_number(entry.get("used_ratio"))
+            reset = _kimi_code_reset(entry)
+            if ratio is None or reset is None:
+                continue
+            limits[key] = _limit(ratio * 100, reset)
+    rows = data.get("limits")
+    if isinstance(rows, list):
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            detail = row.get("detail")
+            if not isinstance(detail, dict):
+                detail = row
+            limit_value = _kimi_number(detail.get("limit"))
+            used = _kimi_number(detail.get("used"))
+            if used is None and limit_value is not None:
+                remaining = _kimi_number(detail.get("remaining"))
+                if remaining is not None:
+                    used = limit_value - remaining
+            reset = _kimi_code_reset(detail)
+            if used is None or limit_value is None or limit_value <= 0 or reset is None:
+                continue
+            window = row.get("window")
+            seconds = _kimi_code_window_seconds(
+                window if isinstance(window, dict) else {}, row, detail
+            )
+            if seconds <= 0:
+                continue
+            key = _codex_window_key(int(seconds))
+            if key not in limits:
+                limits[key] = _limit(used / limit_value * 100, reset)
+    return limits
+
+
+def _fetch_kimi_code(timeout: float) -> dict:
+    try:
+        limits = _kimi_code_limits(_kimi_code_usage(timeout))
+        if not limits:
+            raise RuntimeError("kimi code usage response has no recognized windows")
+        return {"accounts": [_account("", limits)]}
+    except (RuntimeError, TypeError, ValueError) as exc:
+        log.warning("Kimi Code usage fetch failed: %s", exc)
         return _provider_error(str(exc))
 
 

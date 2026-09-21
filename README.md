@@ -18,9 +18,10 @@ Buttons can:
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
 
-LCD buttons can show remaining Claude, Codex, OpenCode Go, and xAI (Grok) plan
-usage, plus the Moonshot (Kimi API) account balance. The daemon reads credentials
-maintained by `claude /login`, `codex login`, and OpenCode `/connect`, then
+LCD buttons can show remaining Claude, Codex, OpenCode Go, Kimi Code, and
+xAI (Grok) plan usage, plus the Moonshot (Kimi API) account balance. The daemon reads credentials
+maintained by `claude /login`, `codex login`, `/login` inside Kimi CLI, and
+OpenCode `/connect`, then
 fetches usage directly from each provider. Configure one `[[page.widget]]` per
 provider/window; each renders on the button at its `pos`:
 
@@ -61,6 +62,28 @@ label = "7D"
 icon = "xai"
 ```
 
+Kimi for Coding reports the plan's 5-hour and monthly quota from
+`https://api.kimi.com/coding/v1/usages` (override with `KIMI_CODE_BASE_URL`):
+
+```toml
+[[page.widget]]
+pos = 5
+provider = "kimi-code"
+limit = "five_hour"        # five_hour | monthly
+label = "5H"
+icon = "moonshot"
+```
+
+Credentials are resolved in order: Kimi CLI OAuth tokens from `/login` inside
+Kimi CLI (`~/.kimi/credentials/kimi-code.json`; `KIMI_SHARE_DIR` is respected,
+set `ULANZI_KIMI_CODE_CREDENTIALS` to override the exact path), then pi's
+`kimi-coding` OAuth entry in `~/.pi/agent/auth.json` (`PI_CODING_AGENT_DIR` is
+respected, set `ULANZI_PI_AUTH` to override), then the `kimi-code-plan-cn` /
+`kimi-code-plan-global` API keys saved by OpenCode `/connect` (the global entry
+targets api.kimi.ai instead). Near-expiry OAuth tokens are refreshed and the
+rotated credentials are written back atomically; API keys cannot be refreshed,
+so rotate them in OpenCode when they expire.
+
 Moonshot's Kimi API is pay-as-you-go, so its widget shows the remaining
 account balance instead of a percentage, colored green / yellow / red as it
 drops below ¥70 / ¥36 (CNY) or $12 / $6 (USD):
@@ -83,7 +106,8 @@ platforms respectively.
 Pressing a usage button requests a refresh and opens the provider's usage page in the browser.
 Defaults: `https://claude.ai/new#settings/usage` (Claude),
 `https://chatgpt.com/#settings/Usage` (Codex), `https://opencode.ai/go`
-(OpenCode Go), `https://grok.com/?_s=usage` (xAI),
+(OpenCode Go), `https://www.kimi.com/code/console` (Kimi Code),
+`https://grok.com/?_s=usage` (xAI),
 `https://platform.kimi.com/console/account` (Moonshot). Set
 `url` on a widget to override:
 
@@ -99,7 +123,8 @@ Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
 widget shows the remaining percentage and reset time. Provider data is fetched
 concurrently in the background (never blocking the event loop) and updated
 automatically when the fetch completes. Results are cached for 30 minutes to
-limit provider API traffic. Claude and Codex access tokens near expiry are
+limit provider API traffic. Claude, Codex, and Kimi Code access tokens near
+expiry are
 refreshed using the CLI's refresh token and the rotated credentials are written
 back atomically. If a usage request returns HTTP 401, its access token is
 refreshed and the request is retried once.

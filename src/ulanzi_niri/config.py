@@ -180,6 +180,7 @@ PROVIDER_URLS = {
     "opencode-go": "https://opencode.ai/go",
     "moonshot": "https://platform.kimi.com/console/account",
     "xai": "https://grok.com/?_s=usage",
+    "kimi-code": "https://www.kimi.com/code/console",
 }
 
 
@@ -187,7 +188,7 @@ class UsageWidget(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     pos: int
-    provider: Literal["claude", "codex", "opencode-go", "moonshot", "xai"]
+    provider: Literal["claude", "codex", "opencode-go", "moonshot", "xai", "kimi-code"]
     account: str = ""  # empty = the provider's active account
     limit: Literal[
         "five_hour", "seven_day", "seven_day_fable", "rolling", "weekly", "monthly", "balance"
@@ -216,6 +217,7 @@ class UsageWidget(BaseModel):
             "opencode-go": {"rolling", "weekly", "monthly"},
             "moonshot": {"balance"},
             "xai": {"weekly"},
+            "kimi-code": {"five_hour", "monthly"},
         }
         if self.limit not in allowed[self.provider]:
             raise ValueError(
