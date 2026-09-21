@@ -185,10 +185,11 @@ mode = "time-weekday"
 # ...
 
 # ----------------------------------------------------------------------- usage page
-# A page that shows remaining Claude/Codex/OpenCode Go/xAI usage and the Moonshot
-# (Kimi API) account balance on LCD buttons. Uses credentials maintained by
-# `claude /login`, `codex login`, `grok login`, and OpenCode `/connect`. Provider data is
-# fetched directly and refreshed every 30 minutes.
+# A page that shows remaining Claude/Codex/OpenCode Go/Kimi Code/xAI usage and
+# the Moonshot (Kimi API) account balance on LCD buttons. Uses credentials
+# maintained by `claude /login`, `codex login`, `grok login`, `/login` inside
+# Kimi CLI, and OpenCode `/connect`. Provider data is fetched directly and
+# refreshed every 30 minutes.
 # Uncomment this page to enable it — the "Usage" button above points at it.
 #
 # Pressing a usage button requests a refresh (throttled to once every 90 seconds)
@@ -207,14 +208,6 @@ mode = "time-weekday"
 # # Placeholder: no button actions.
 #
 # [[page.widget]]
-# pos = 3
-# provider = "claude"
-# account = ""
-# limit = "seven_day_fable"
-# label = "FABLE"
-# icon = "claude-desktop"
-#
-# [[page.widget]]
 # pos = 1
 # provider = "claude"
 # account = ""
@@ -229,6 +222,22 @@ mode = "time-weekday"
 # limit = "seven_day"
 # label = "7D"
 # icon = "claude-desktop"
+#
+# [[page.widget]]
+# pos = 3
+# provider = "claude"
+# account = ""
+# limit = "seven_day_fable"
+# label = "FABLE"
+# icon = "claude-desktop"
+#
+# [[page.widget]]
+# pos = 4
+# provider = "xai"
+# account = ""
+# limit = "weekly"
+# label = "7D"
+# icon = "xai"
 #
 # [[page.widget]]
 # pos = 5
@@ -276,7 +285,7 @@ mode = "time-weekday"
 # OpenCode's auth.json; moonshotai-cn targets the China platform (CNY).
 #
 # [[page.widget]]
-# pos = 4
+# pos = 10
 # provider = "moonshot"
 # account = ""
 # limit = "balance"
@@ -284,13 +293,27 @@ mode = "time-weekday"
 # icon = "moonshot"
 # url = "https://platform.kimi.com/console/account"  # override the press URL
 #
+# Kimi Code shows the plan's 5-hour and monthly quota. Credentials come from
+# Kimi CLI (`/login`, ~/.kimi/credentials/kimi-code.json), pi's `kimi-coding`
+# OAuth entry in ~/.pi/agent/auth.json, or the `kimi-code-plan-cn` /
+# `kimi-code-plan-global` API keys in OpenCode's auth.json.
+#
 # [[page.widget]]
-# pos = 10
-# provider = "xai"
+# pos = 11
+# provider = "kimi-code"
 # account = ""
-# limit = "weekly"
-# label = "7D"
-# icon = "xai"
+# limit = "five_hour"
+# label = "5H"
+# icon = "moonshot"
+#
+# [[page.widget]]
+# pos = 12
+# provider = "kimi-code"
+# account = ""
+# limit = "monthly"
+# label = "30D"
+# icon = "moonshot"
+#
 #
 # [[page.button]]
 # pos = 14

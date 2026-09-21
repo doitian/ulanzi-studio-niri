@@ -28,6 +28,7 @@ from ulanzi_niri.protocol.device import DeckEvent, DeckEventKind
         ("codex", "seven_day"),
         ("opencode-go", "rolling"),
         ("moonshot", "balance"),
+        ("kimi-code", "monthly"),
     ],
 )
 @pytest.mark.parametrize("custom_url", [None, "https://example.com/usage"])

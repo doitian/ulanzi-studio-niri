@@ -281,7 +281,9 @@ def _format_usage_report(data: dict | None) -> tuple[str, bool]:
         return "No usage data available.", False
 
     provider_names = [
-        name for name in ("claude", "codex", "opencode-go", "moonshot", "xai") if name in providers
+        name
+        for name in ("claude", "codex", "opencode-go", "moonshot", "xai", "kimi-code")
+        if name in providers
     ]
     provider_names.extend(sorted(name for name in providers if name not in provider_names))
     sections: list[str] = []
@@ -298,7 +300,7 @@ def _format_usage_report(data: dict | None) -> tuple[str, bool]:
 
     for provider_name in provider_names:
         provider = providers[provider_name]
-        title = {"opencode-go": "OpenCode Go", "xai": "xAI"}.get(
+        title = {"opencode-go": "OpenCode Go", "xai": "xAI", "kimi-code": "Kimi Code"}.get(
             provider_name, provider_name.capitalize()
         )
         if not isinstance(provider, dict):
