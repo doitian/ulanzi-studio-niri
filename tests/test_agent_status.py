@@ -5,7 +5,7 @@ from io import BytesIO
 from unittest.mock import AsyncMock, Mock
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from ulanzi_niri import agent_status, service
 from ulanzi_niri.agent_status import (
@@ -230,6 +230,22 @@ def test_render_widget_reports_the_error_code_before_any_reading() -> None:
     img = _pixels(render_agent_widget(AgentStatusWidget(pos=0), snapshot))
     # No bottom bar is drawn without a reading; the area stays black.
     assert _bar_center(img, 0) == (0, 0, 0)
+
+
+def test_render_widget_label_fits_beside_the_icon() -> None:
+    from ulanzi_niri.icons import _font as load_font
+
+    img = Image.new("RGB", (196, 196))
+    draw = ImageDraw.Draw(img)
+    snapshot = AgentStatusSnapshot(providers=PROVIDERS, fetched_at=100.0, error=None)
+    # OC is the default label for opencode; unknown agents fall back to upper().
+    assert agent_status._DEFAULT_LABELS["opencode"] == "OC"
+    assert agent_status._DEFAULT_LABELS["all"] == "AGENTS"
+    for agent in ("opencode", "pi", "claude", "codex", "grok", "all"):
+        widget = AgentStatusWidget(pos=0, agent=agent)
+        render_agent_widget(widget, snapshot, now=100.0)
+        label = widget.label or agent_status._DEFAULT_LABELS.get(agent, agent.upper())
+        assert draw.textlength(label, font=load_font(22)) <= 196 - 2 * 20 - 40 - 8
 
 
 # --------------------------------------------------------------------------- config

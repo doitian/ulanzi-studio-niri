@@ -63,12 +63,15 @@ _ERRORS = {
     "invalid_response": ("Err", "AGENT-BERTH", _RED),
 }
 
+_DEFAULT_LABELS = {"all": "AGENTS", "opencode": "OC"}
+
 _DEFAULT_ICONS = {
     "all": "utilities-terminal",
     "claude": "claude-desktop",
     "codex": "chatgpt",
     "opencode": "opencode",
     "grok": "xai",
+    "pi": "pi",
 }
 
 _BAR_HEIGHT = 10
@@ -323,11 +326,16 @@ def render_agent_widget(
     max_width = size - 2 * padding
     middle_y = round(size * 0.6)
 
-    label = widget.label or ("AGENTS" if widget.agent == "all" else widget.agent.upper())
+    label = widget.label or _DEFAULT_LABELS.get(widget.agent, widget.agent.upper())
     icon_name = widget.icon if widget.icon is not None else _DEFAULT_ICONS.get(widget.agent)
     icon = _load_corner_icon(icon_name, 40) if icon_name else None
 
-    font = load_font(28)
+    # The label shares its row with the corner icon; shrink it to fit alongside.
+    label_width = max_width - (icon.width + 8 if icon is not None else 0)
+    label_size = 22
+    while label_size > 12 and draw.textlength(label, font=load_font(label_size)) > label_width:
+        label_size -= 2
+    font = load_font(label_size)
     bbox = draw.textbbox((0, 0), label, font=font)
     label_h = bbox[3] - bbox[1]
     icon_center = padding + icon.height // 2 if icon is not None else None

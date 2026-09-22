@@ -368,7 +368,7 @@ mode = "time-weekday"
 #
 # [[page.agent_status]]
 # pos = 9
-# agent = "pi"
+# agent = "grok"
 #
 # [[page.button]]
 # pos = 10
