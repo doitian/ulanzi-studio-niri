@@ -197,6 +197,10 @@ mode = "time-weekday"
 # (defaults: claude.ai, chatgpt.com, opencode.ai/go, grok.com, platform.kimi.com);
 # set `url` on a widget to override it.
 #
+# Widgets for day-based windows (seven_day, seven_day_fable, weekly, monthly)
+# can also draw the remaining usage share and the remaining share of the
+# window as side bars: gauge = "bars" (default "none").
+#
 # [[page]]
 # name = "usage"
 # layer = "home"

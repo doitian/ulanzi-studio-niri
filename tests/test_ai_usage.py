@@ -424,6 +424,56 @@ def test_render_widget_missing_icon_falls_back_to_black(monkeypatch) -> None:
     assert img.getpixel((0, 0)) == (0, 0, 0)
 
 
+def _limit_info(
+    remaining: float, seconds: float, resets_at: str = "2026-09-03T08:00:00+00:00"
+) -> ai_usage.UsageLimit:
+    return ai_usage.UsageLimit(
+        remaining_percent=remaining, resets_at=resets_at, reset_after_seconds=seconds
+    )
+
+
+def test_gauges_cover_day_windows_only() -> None:
+    for limit in ("five_hour", "rolling", "balance", "absent"):
+        assert ai_usage.gauges(_limit_info(50, 86400), limit) is None
+    assert ai_usage.gauges(None, "seven_day") is None
+    balance = ai_usage.UsageLimit(
+        remaining_percent=None,
+        resets_at="",
+        reset_after_seconds=0,
+        remaining_amount=12.0,
+        currency="USD",
+    )
+    assert ai_usage.gauges(balance, "seven_day") is None
+
+
+def test_gauges_clamp_remaining_share_of_period() -> None:
+    day = 86400
+    assert ai_usage.gauges(_limit_info(40, 3.5 * day), "seven_day") == (0.4, 0.5)
+    assert ai_usage.gauges(_limit_info(0, 15 * day), "monthly") == (0.0, 0.5)
+    assert ai_usage.gauges(_limit_info(60, 0), "weekly") == (0.6, 0.0)
+    assert ai_usage.gauges(_limit_info(60, 30 * day), "weekly") == (0.6, 1.0)
+    assert ai_usage.gauges(_limit_info(60, 0, resets_at=""), "weekly") == (0.6, None)
+
+
+def test_render_widget_gauge_bars() -> None:
+    widget = UsageWidget(pos=1, provider="claude", limit="seven_day", gauge="bars")
+    img = Image.open(io.BytesIO(render_widget(widget, PROVIDERS))).convert("RGB")
+    # 97% usage fills most of the left bar; the top sliver stays on the track.
+    assert img.getpixel((10, 180)) == ai_usage._COLOR_GREEN
+    assert img.getpixel((10, 72)) == ai_usage._COLOR_TRACK
+    # 16% of the window remains: the right bar is blue at the bottom, track above.
+    assert img.getpixel((185, 180)) == ai_usage._COLOR_BLUE
+    assert img.getpixel((185, 100)) == ai_usage._COLOR_TRACK
+
+
+def test_render_widget_gauge_draws_nothing_when_off_or_hour_window() -> None:
+    for gauge, limit in (("none", "seven_day"), ("bars", "five_hour")):
+        widget = UsageWidget(pos=1, provider="claude", limit=limit, gauge=gauge)
+        img = Image.open(io.BytesIO(render_widget(widget, PROVIDERS))).convert("RGB")
+        for point in ((10, 100), (185, 100)):
+            assert img.getpixel(point) == (0, 0, 0), (gauge, limit, point)
+
+
 async def test_fetch_usage_combines_providers(monkeypatch) -> None:
     async def immediate(func, *args):
         return func(*args)
@@ -899,7 +949,10 @@ def test_kimi_cli_credentials_path(monkeypatch, tmp_path) -> None:
     assert ai_usage._kimi_cli_credentials_path() == tmp_path / "custom.json"
     monkeypatch.delenv("ULANZI_KIMI_CODE_CREDENTIALS")
     monkeypatch.setenv("KIMI_SHARE_DIR", str(tmp_path / "kimi"))
-    assert ai_usage._kimi_cli_credentials_path() == tmp_path / "kimi" / "credentials" / "kimi-code.json"
+    assert (
+        ai_usage._kimi_cli_credentials_path()
+        == tmp_path / "kimi" / "credentials" / "kimi-code.json"
+    )
 
 
 def test_fetch_kimi_code_with_cli_credentials(monkeypatch, tmp_path) -> None:
@@ -952,7 +1005,9 @@ def test_kimi_cli_refreshes_expired_token(monkeypatch, tmp_path) -> None:
         ai_usage, "_write_json_atomic", lambda _path, value, **_kwargs: written.append(value)
     )
 
-    token = ai_usage._kimi_cli_access_token(tmp_path / "credentials" / "kimi-code.json", credential, 5)
+    token = ai_usage._kimi_cli_access_token(
+        tmp_path / "credentials" / "kimi-code.json", credential, 5
+    )
 
     assert token == "new-access"
     assert captured["refresh_token"] == "old-refresh"
@@ -994,7 +1049,12 @@ def test_fetch_kimi_code_falls_back_to_pi(monkeypatch, tmp_path) -> None:
 def test_kimi_pi_access_token_preserves_other_entries(monkeypatch, tmp_path) -> None:
     xai_entry = {"type": "oauth", "access": "keep-xai", "refresh": "keep-xai-refresh"}
     credential = {
-        "kimi-coding": {"type": "oauth", "access": "old-access", "refresh": "old-refresh", "expires": 1},
+        "kimi-coding": {
+            "type": "oauth",
+            "access": "old-access",
+            "refresh": "old-refresh",
+            "expires": 1,
+        },
         "xai": xai_entry,
     }
     monkeypatch.setattr(
@@ -1082,7 +1142,9 @@ def test_fetch_kimi_code_requires_usage_windows(monkeypatch, tmp_path) -> None:
 
     provider = ai_usage._fetch_kimi_code(5)
 
-    assert provider == {"error": "request failed: kimi code usage response has no recognized windows"}
+    assert provider == {
+        "error": "request failed: kimi code usage response has no recognized windows"
+    }
 
 
 def test_codex_refreshes_expired_token(monkeypatch, tmp_path) -> None:
