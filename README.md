@@ -14,6 +14,7 @@ Buttons can:
 - Switch between configured pages
 - Adjust deck brightness
 - Refresh usage widgets on demand
+- Show coding agent session counts (waiting/running/done/idle) from agent-berth
 
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
@@ -165,6 +166,60 @@ finishes; reading while it is running returns the previous result.
 The raw control socket request is `refresh-ai-usage\n`, sent to
 `$XDG_RUNTIME_DIR/ulanzi-niri.sock`; its reply is `OK refresh-requested\n`.
 For a refresh followed by its result, send `ai-usage --refresh\n` instead.
+
+## Agent status
+
+LCD buttons can show how many coding agent sessions are in each state, as
+tracked by [agent-berth](https://github.com/doitian/agent-berth). The daemon
+runs `agent-berth stats --json`, so the executable must be on the daemon's
+PATH; set `ULANZI_AGENT_BERTH` to its exact path otherwise. Run
+`agent-berth setup` once to install the provider hooks — the widget only reads
+its snapshots. Configure one `[[page.agent_status]]` per button:
+
+```toml
+[[page.agent_status]]
+pos = 0
+agent = "all"            # "all" sums every provider agent-berth reports
+label = "AGENTS"
+
+[[page.agent_status]]
+pos = 1
+agent = "claude"         # one provider per button
+```
+
+Each button shows the label at top left, the agent icon at top right, the most
+urgent status as a large glyph next to its session count across the middle,
+and a bar along the bottom with one segment per status. The center number is
+the count of the highest-priority non-empty status (**waiting > running > done
+> idle**) and takes that status's color: waiting is orange, running yellow,
+done blue, and idle green. The bottom bar lights the segment of every status
+that has sessions, in the same order and colors. An agent with no sessions
+shows a green pause and `0`. `agent = "all"` also sums providers this daemon
+has no icon for, so a new agent-berth provider is counted before the widget
+knows its name.
+
+All buttons share one reading, refreshed every two seconds while a page with
+agent status widgets is visible; pressing a button requests an immediate
+refresh (throttled to one read every 0.5 seconds) and opens the widget's
+optional `url`. A failure keeps the last counts and renders them in gray with
+a `stale` caption. When no reading has arrived yet, `n/a` / `NO CLI` means
+`agent-berth` was not found, `Err` / `AGENT-BERTH` means it failed or returned
+an unusable payload, and `TO` / `AGENT-BERTH` means it did not answer within
+five seconds.
+
+The same cached counts are available from the running daemon:
+
+```sh
+ulanzi-niri agent-status
+ulanzi-niri agent-status --refresh --json
+ulanzi-niri control refresh-agent-status
+```
+
+These mirror the `ai-usage` commands: the plain form prints the cached counts
+without waiting, `--refresh` waits for a fresh reading (default 15-second
+reply timeout), `--json` prints the `providers` object, and the control
+command returns `refresh-requested` immediately. The raw socket requests are
+`agent-status\n` (or `agent-status --refresh\n`) and `refresh-agent-status\n`.
 
 ## Hardware
 

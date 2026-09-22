@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -236,6 +237,50 @@ class UsageWidget(BaseModel):
         return v
 
 
+_AGENT_NAME = re.compile(r"(?:all|[a-z0-9][a-z0-9_-]{0,31})$")
+
+
+class AgentStatusWidget(BaseModel):
+    """A button showing agent-berth session counts for one agent or ``all``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    pos: int
+    agent: str = "all"  # provider name, or "all" to sum every provider
+    label: str = ""
+    icon: str | None = None
+    url: str | None = None  # opened on press; blank only refreshes the counts
+
+    @field_validator("agent")
+    @classmethod
+    def _validate_agent(cls, v: str) -> str:
+        v = v.strip().lower()
+        if not _AGENT_NAME.fullmatch(v):
+            raise ValueError(f"agent {v!r} must be 'all' or a provider name")
+        return v
+
+    @field_validator("url")
+    @classmethod
+    def _validate_url(cls, v: str | None) -> str | None:
+        if v is None:
+            return v
+        v = v.strip()
+        if not v:
+            raise ValueError("url must not be empty")
+        if "://" not in v:
+            raise ValueError(f"url {v!r} must include a scheme (e.g. https://)")
+        return v
+
+    @field_validator("pos")
+    @classmethod
+    def _validate_pos(cls, v: int) -> int:
+        if v not in LCD_POS_RANGE:
+            raise ValueError(
+                f"widget pos {v} out of range; valid LCD positions: {sorted(LCD_POS_RANGE)}"
+            )
+        return v
+
+
 class WideTileEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -262,6 +307,7 @@ class PageConfig(BaseModel):
     button: list[ButtonEntry] = Field(default_factory=list)
     encoder: list[EncoderEntry] = Field(default_factory=list)
     widget: list[UsageWidget] = Field(default_factory=list)
+    agent_status: list[AgentStatusWidget] = Field(default_factory=list)
     wide_tile: WideTileEntry | None = None
 
     @field_validator("wide_tile", mode="before")
@@ -288,7 +334,7 @@ class PageConfig(BaseModel):
             if e.index in seen_e:
                 raise ValueError(f"page {self.name!r}: duplicate encoder index {e.index}")
             seen_e.add(e.index)
-        widget_pos = [w.pos for w in self.widget]
+        widget_pos = [w.pos for w in self.widget] + [w.pos for w in self.agent_status]
         if len(widget_pos) != len(set(widget_pos)):
             raise ValueError(f"page {self.name!r}: duplicate widget pos")
         overlap = seen & set(widget_pos)

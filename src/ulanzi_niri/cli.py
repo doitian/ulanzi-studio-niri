@@ -54,6 +54,23 @@ def build_parser() -> argparse.ArgumentParser:
         "--refresh", action="store_true", help="wait for fresh usage from the daemon before printing"
     )
 
+    p_agents = sub.add_parser(
+        "agent-status", help="show agent session counts cached by the running daemon"
+    )
+    p_agents.add_argument("--log-level", default=None, help="DEBUG, INFO, WARNING, ERROR")
+    p_agents.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help="daemon reply timeout in seconds (default: 2, or 15 with --refresh)",
+    )
+    p_agents.add_argument("--json", action="store_true", help="output session counts as JSON")
+    p_agents.add_argument(
+        "--refresh",
+        action="store_true",
+        help="wait for a fresh agent-berth reading from the daemon before printing",
+    )
+
     p_render = sub.add_parser("render", help="render the current page to PNG files (no device)")
     _add_common(p_render)
     p_render.add_argument("--out", type=Path, default=Path("/tmp/ulanzi-render"))
@@ -80,6 +97,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_goto.add_argument("page")
     ctrl.add_parser("back", help="return to the previous page in history")
     ctrl.add_parser("refresh-ai-usage", help="request a background refresh of all AI usage")
+    ctrl.add_parser("refresh-agent-status", help="request a background agent status refresh")
 
     sub.add_parser("install-udev", help="print the sudo commands to install the udev rule")
 
@@ -110,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_doctor(args)
     if cmd == "ai-usage":
         return _cmd_usage(args)
+    if cmd == "agent-status":
+        return _cmd_agent_status(args)
     if cmd == "render":
         return _cmd_render(args)
     if cmd == "push":
@@ -151,6 +171,8 @@ def _cmd_control(args: argparse.Namespace) -> int:
         return _send_control("back")
     if cmd == "refresh-ai-usage":
         return _send_control("refresh-ai-usage")
+    if cmd == "refresh-agent-status":
+        return _send_control("refresh-agent-status")
     return 2
 
 
@@ -398,6 +420,76 @@ def _cmd_usage(args: argparse.Namespace) -> int:
     if result.status is FetchStatus.TIMEOUT:
         return 1
     return 0 if any_success else 1
+
+
+def _read_cached_agent_status(timeout: float, *, refresh: bool = False) -> dict:
+    path = control_socket_path()
+    if path is None:
+        raise RuntimeError("driver not running")
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as sock:
+            sock.settimeout(CONTROL_CONNECT_TIMEOUT)
+            sock.connect(str(path))
+            sock.settimeout(timeout)
+            sock.sendall(b"agent-status --refresh\n" if refresh else b"agent-status\n")
+            sock.shutdown(socket.SHUT_WR)
+            with sock.makefile(encoding="utf-8") as stream:
+                reply = stream.readline()
+    except TimeoutError as exc:
+        raise RuntimeError("driver busy") from exc
+    except OSError as exc:
+        raise RuntimeError("driver not running") from exc
+    if reply.strip() == "ERR unknown":
+        raise RuntimeError("restart the daemon to enable cached agent status")
+    try:
+        if not reply.startswith("OK "):
+            raise ValueError("unexpected reply")
+        payload = json.loads(reply[3:])
+        if not isinstance(payload, dict) or not isinstance(payload.get("providers"), dict):
+            raise ValueError("invalid agent status data")
+        return payload
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("invalid agent status response from daemon") from exc
+
+
+def _format_agent_counts(counts: dict) -> str:
+    from .agent_status import STATUSES
+
+    parts = []
+    for status in STATUSES:
+        value = counts.get(status)
+        if isinstance(value, int) and value > 0:
+            parts.append(f"{value} {status}")
+    return ", ".join(parts) if parts else "no sessions"
+
+
+def _format_agent_report(payload: dict) -> str:
+    from .agent_status import summarize
+
+    providers = payload.get("providers") if isinstance(payload, dict) else None
+    if not isinstance(providers, dict) or not providers:
+        error = payload.get("error") if isinstance(payload, dict) else None
+        suffix = f" ({error})" if error else ""
+        return f"No agent status data available.{suffix}"
+    lines = [f"{name}: {_format_agent_counts(providers[name])}" for name in sorted(providers)]
+    if len(providers) > 1:
+        lines.append(f"all: {_format_agent_counts(summarize(providers, 'all').counts)}")
+    return "\n".join(lines)
+
+
+def _cmd_agent_status(args: argparse.Namespace) -> int:
+    timeout = args.timeout if args.timeout is not None else (15.0 if args.refresh else 2.0)
+    if timeout <= 0:
+        print("timeout must be greater than zero", file=sys.stderr)
+        return 2
+    try:
+        payload = _read_cached_agent_status(timeout=timeout, refresh=args.refresh)
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        payload = {"providers": {}, "error": str(exc)}
+    print(json.dumps(payload, indent=2) if args.json else _format_agent_report(payload))
+    error = payload.get("error")
+    return 1 if error or not payload.get("providers") else 0
 
 
 def _cmd_render(args: argparse.Namespace) -> int:

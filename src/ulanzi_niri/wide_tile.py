@@ -25,8 +25,9 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageOps
 
+from .agent_status import AGENT_POLL_SECONDS
 from .ai_usage import USAGE_REFRESH_SECONDS
-from .config import UsageWidget, WideTileEntry
+from .config import AgentStatusWidget, UsageWidget, WideTileEntry
 from .protocol.ulanzi_d200x import WIDE_TILE_GEOMETRY, SmallWindowMode, UlanziD200XDevice
 from .stats import StatsSnapshot, prime_cpu_sampler
 
@@ -45,6 +46,7 @@ _CLOCK_MODES: dict[str, SmallWindowMode] = {
 class WideTileState:
     config: WideTileEntry
     widgets: list[UsageWidget] = field(default_factory=list)
+    agent_widgets: list[AgentStatusWidget] = field(default_factory=list)
 
 
 def render_background(config: WideTileEntry, page_index: int, page_count: int) -> bytes:
@@ -101,11 +103,13 @@ class WideTileWorker:
         interval_ms: int,
         *,
         refresh: Callable[[], Awaitable[None]] | None = None,
+        poll: Callable[[], None] | None = None,
     ) -> None:
         self._device = device
         self._state = state
         self._interval = max(0.05, interval_ms / 1000.0)
         self._refresh = refresh
+        self._poll = poll
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
 
@@ -130,13 +134,24 @@ class WideTileWorker:
     async def _run(self) -> None:
         loop = asyncio.get_running_loop()
         last_widget_refresh = loop.time()
+        last_agent_poll = loop.time()
         while not self._stop.is_set():
             try:
                 await self._tick()
             except Exception:  # noqa: BLE001
                 log.exception("wide-tile tick failed")
+            now = loop.time()
+            if (
+                self._poll is not None
+                and self._state.agent_widgets
+                and now - last_agent_poll >= AGENT_POLL_SECONDS
+            ):
+                last_agent_poll = now
+                try:
+                    self._poll()
+                except Exception:  # noqa: BLE001
+                    log.exception("agent status poll failed")
             if self._refresh is not None and self._state.widgets:
-                now = loop.time()
                 if now - last_widget_refresh >= USAGE_REFRESH_SECONDS:
                     last_widget_refresh = now
                     try:

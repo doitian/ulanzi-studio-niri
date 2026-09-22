@@ -331,3 +331,66 @@ mode = "time-weekday"
 #
 # [page.wide_tile]
 # mode = "time-weekday"
+
+# ----------------------------------------------------------------------- agents page
+# A page that shows coding agent session counts from agent-berth on LCD
+# buttons (waiting > running > done > idle). The daemon runs `agent-berth
+# stats --json` (set ULANZI_AGENT_BERTH to its exact path if it is not on the
+# daemon's PATH); run `agent-berth setup` once to install the provider hooks.
+# Counts refresh every two seconds while the page is visible; pressing a
+# widget forces a refresh and opens `url` when set.
+#
+# [[page]]
+# name = "agents"
+# layer = "home"
+#
+# [[page.button]]
+# pos = 0
+# label = "Agents"
+# icon = "agent-status"
+# # Placeholder: no button actions.
+#
+# [[page.agent_status]]
+# pos = 5
+# agent = "opencode"
+#
+# [[page.agent_status]]
+# pos = 6
+# agent = "pi"
+#
+# [[page.agent_status]]
+# pos = 7
+# agent = "claude"
+#
+# [[page.agent_status]]
+# pos = 8
+# agent = "codex"
+#
+# [[page.agent_status]]
+# pos = 9
+# agent = "grok"
+#
+# [[page.button]]
+# pos = 10
+# label = "Voice"
+# icon = "audio-input-microphone"
+# # Toggle hyprwhspr recording (voice input).
+# on_press = { type = "exec", cmd = "hyprwhspr record toggle" }
+#
+# # "all" sums every provider agent-berth reports.
+# [[page.agent_status]]
+# pos = 12
+# agent = "all"
+#
+# [[page.button]]
+# pos = 14
+# label = "Prev"
+# on_press = { type = "page", cycle = -1 }
+#
+# [[page.button]]
+# pos = 15
+# label = "Next"
+# on_press = { type = "page", cycle = 1 }
+#
+# [page.wide_tile]
+# mode = "time-weekday"
