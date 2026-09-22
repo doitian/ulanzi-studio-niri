@@ -331,3 +331,43 @@ mode = "time-weekday"
 #
 # [page.wide_tile]
 # mode = "time-weekday"
+
+# ----------------------------------------------------------------------- agents page
+# A page that shows coding agent session counts from agent-berth on LCD
+# buttons. The daemon runs `agent-berth stats --json` (set ULANZI_AGENT_BERTH
+# to its exact path if it is not on the daemon's PATH); run `agent-berth
+# setup` once to install the provider hooks. Counts refresh every two seconds
+# while the page is visible; pressing a widget forces a refresh and opens
+# `url` when set.
+#
+# [[page]]
+# name = "agents"
+# layer = "home"
+#
+# [[page.agent_status]]
+# pos = 0
+# agent = "all"           # "all" sums every provider agent-berth reports
+# label = "AGENTS"
+# icon = "utilities-terminal"
+#
+# [[page.agent_status]]
+# pos = 1
+# agent = "claude"
+#
+# [[page.agent_status]]
+# pos = 2
+# agent = "pi"
+# url = "https://example.com/agents"  # optional; opened on press
+#
+# [[page.button]]
+# pos = 14
+# label = "Prev"
+# on_press = { type = "page", cycle = -1 }
+#
+# [[page.button]]
+# pos = 15
+# label = "Next"
+# on_press = { type = "page", cycle = 1 }
+#
+# [page.wide_tile]
+# mode = "time-weekday"

@@ -12,6 +12,7 @@ from pathlib import Path
 from watchfiles import awatch
 
 from .actions import ActionContext, dispatch
+from .agent_status import AgentStatusFetcher, render_agent_widget
 from .ai_usage import UsageFetcher, render_widget
 from .config import (
     PROVIDER_URLS,
@@ -64,6 +65,9 @@ class Service:
         self._brightness: int = self._cfg.device.brightness
         self._usage = UsageFetcher()
         self._usage.set_on_update(self._on_usage_update)
+        self._agents = AgentStatusFetcher()
+        self._agents.set_on_update(self._on_agent_update)
+        self._last_agent_render_key: object = None
         self._page_lock = asyncio.Lock()
         self._control_server: asyncio.AbstractServer | None = None
         self._control_path: Path | None = None
@@ -122,6 +126,20 @@ class Service:
         if line == "refresh-ai-usage":
             self._usage.refresh(force=True)
             return "OK refresh-requested"
+        if line == "refresh-agent-status":
+            self._agents.refresh(force=True)
+            return "OK refresh-requested"
+        if line in {"agent-status", "agent-status --refresh"}:
+            snapshot = (
+                await self._agents.refresh_and_wait()
+                if line == "agent-status --refresh"
+                else self._agents.get()
+            )
+            return "OK " + json.dumps(
+                {"providers": snapshot.providers, "error": snapshot.error}
+                if snapshot is not None
+                else {"providers": {}, "error": None}
+            )
         if line in {"ai-usage", "ai-usage --refresh"}:
             result = (
                 await self._usage.refresh_and_wait()
@@ -293,21 +311,44 @@ class Service:
         log.info("pushed page %r (%d buttons)", page.name, len(page.button))
 
     async def _render_widget_images(self, page: PageConfig) -> dict[int, bytes]:
-        if not page.widget:
-            return {}
-        result = self._usage.get()
-        self._usage.refresh()
-        if result is None:
-            return {w.pos: render_widget(w, {}) for w in page.widget}
-        providers = (result.data or {}).get("providers", {})
-        return {
-            w.pos: render_widget(w, providers, status=result.status)
-            for w in page.widget
-        }
+        images: dict[int, bytes] = {}
+        if page.widget:
+            result = self._usage.get()
+            self._usage.refresh()
+            if result is None:
+                images.update({w.pos: render_widget(w, {}) for w in page.widget})
+            else:
+                providers = (result.data or {}).get("providers", {})
+                images.update(
+                    {w.pos: render_widget(w, providers, status=result.status) for w in page.widget}
+                )
+        if page.agent_status:
+            snapshot = self._agents.get()
+            self._agents.refresh()
+            now = asyncio.get_running_loop().time()
+            images.update(
+                {w.pos: render_agent_widget(w, snapshot, now=now) for w in page.agent_status}
+            )
+            self._last_agent_render_key = (
+                None if snapshot is None else (snapshot.providers, snapshot.error)
+            )
+        else:
+            self._last_agent_render_key = None
+        return images
 
     async def _on_usage_update(self) -> None:
         if self._device is not None and self._pages.current.widget:
             await self._render_current_page()
+
+    async def _on_agent_update(self) -> None:
+        page = self._pages.current
+        if self._device is None or not page.agent_status:
+            return
+        snapshot = self._agents.get()
+        key = None if snapshot is None else (snapshot.providers, snapshot.error)
+        if key == self._last_agent_render_key:
+            return
+        await self._render_current_page()
 
     def _start_wide_tile_worker(self) -> None:
         assert self._device is not None
@@ -316,6 +357,7 @@ class Service:
         state = WideTileState(
             config=cfg,
             widgets=page.widget,
+            agent_widgets=page.agent_status,
         )
         if self._wide is not None:
             self._wide.update_state(state)
@@ -325,6 +367,7 @@ class Service:
             state,
             interval_ms=self._cfg.device.stats_interval_ms,
             refresh=self._render_current_page,
+            poll=self._agents.refresh,
         )
         self._wide.start()
 
@@ -355,7 +398,7 @@ class Service:
         button = next((b for b in self._pages.current.button if b.pos == pos), None)
         if button is None:
             if event.pressed:
-                await self._open_widget_url(pos)
+                await self._on_widget_press(pos)
             return
         ctx = ActionContext(self, self._pages.name, f"button:{pos}")
         loop = asyncio.get_running_loop()
@@ -373,6 +416,7 @@ class Service:
                         return
                     press_state.long_press_fired = True
                     await dispatch(button.on_long_press, ctx)
+
                 state.long_press_task = asyncio.create_task(fire_long_press())
             else:
                 # No long-press configured: fire on_press immediately on the press edge
@@ -393,12 +437,18 @@ class Service:
             if button.on_release is not None:
                 await dispatch(button.on_release, ctx)
 
-    async def _open_widget_url(self, pos: int) -> None:
-        widget = next((w for w in self._pages.current.widget if w.pos == pos), None)
-        if widget is None:
-            return
-        self._usage.refresh(force=True)
-        url = widget.url or PROVIDER_URLS.get(widget.provider)
+    async def _on_widget_press(self, pos: int) -> None:
+        page = self._pages.current
+        agent = next((w for w in page.agent_status if w.pos == pos), None)
+        if agent is not None:
+            self._agents.refresh(force=True)
+            url = agent.url
+        else:
+            widget = next((w for w in page.widget if w.pos == pos), None)
+            if widget is None:
+                return
+            self._usage.refresh(force=True)
+            url = widget.url or PROVIDER_URLS.get(widget.provider)
         if not url:
             return
         # The browser launcher may take time to exit; keep processing deck events.
@@ -453,7 +503,9 @@ class Service:
         if enc is None:
             return
         direction = "cw" if delta > 0 else "ccw"
-        action = (enc.on_press_rotate_cw if delta > 0 else enc.on_press_rotate_ccw) if held else None
+        action = (
+            (enc.on_press_rotate_cw if delta > 0 else enc.on_press_rotate_ccw) if held else None
+        )
         if action is None:
             action = enc.on_rotate_cw if delta > 0 else enc.on_rotate_ccw
         source = f"encoder:{idx}:press_{direction}" if held else f"encoder:{idx}:{direction}"
