@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import tomllib
-from pathlib import Path
+from importlib import resources
 
 import pytest
 from pydantic import ValidationError
 
 from ulanzi_niri.config import Config
 
-EXAMPLE = Path(__file__).resolve().parent.parent / "examples" / "config.toml"
+EXAMPLE = resources.files("ulanzi_niri.data").joinpath("config.toml")
 
 
 def _load(text: str) -> Config:

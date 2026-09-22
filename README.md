@@ -236,8 +236,8 @@ and wtype; install the tools used by your chosen actions separately. Use
 
 ## Configuration
 
-Configuration lives at `~/.config/ulanzi-niri/config.toml`. See
-[`examples/config.toml`](examples/config.toml).
+Configuration lives at `~/.config/ulanzi-niri/config.toml`. See the bundled
+[`config.toml`](src/ulanzi_niri/data/config.toml).
 
 ### Pages and layers
 
