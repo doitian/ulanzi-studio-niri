@@ -196,6 +196,7 @@ class UsageWidget(BaseModel):
     label: str = ""
     icon: str | None = None
     url: str | None = None  # opened on press; defaults to PROVIDER_URLS[provider]
+    gauge: Literal["none", "bars"] = "none"  # usage/time side bars; day-based windows only
 
     @field_validator("url")
     @classmethod

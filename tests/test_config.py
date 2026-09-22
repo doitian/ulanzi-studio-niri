@@ -214,6 +214,50 @@ def test_widget_bad_provider_rejected() -> None:
         )
 
 
+def test_widget_gauge_option() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "claude"
+        limit = "seven_day"
+        gauge = "bars"
+        """
+    )
+    assert cfg.page[0].widget[0].gauge == "bars"
+
+
+def test_widget_gauge_defaults_to_none() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        [[page.widget]]
+        pos = 1
+        provider = "claude"
+        limit = "seven_day"
+        """
+    )
+    assert cfg.page[0].widget[0].gauge == "none"
+
+
+def test_widget_bad_gauge_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "claude"
+            limit = "seven_day"
+            gauge = "pie"
+            """
+        )
+
+
 def test_widget_fable_limit_restricted_to_claude() -> None:
     with pytest.raises(ValidationError):
         _load(

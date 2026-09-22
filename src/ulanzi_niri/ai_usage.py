@@ -1240,6 +1240,22 @@ def _balance_color(amount: float, currency: str) -> tuple[int, int, int]:
     return _COLOR_GREEN
 
 
+# Windows measured in days; the reset gauge needs the full period to compare against.
+_LIMIT_DAYS = {"seven_day": 7, "seven_day_fable": 7, "weekly": 7, "monthly": 30}
+
+
+def gauges(info: UsageLimit | None, limit: str) -> tuple[float, float | None] | None:
+    """Usage-left and window-time-left shares for day-based windows, else ``None``.
+
+    The time share is ``None`` when the window has no reset timestamp.
+    """
+    days = _LIMIT_DAYS.get(limit)
+    if days is None or info is None or info.remaining_percent is None:
+        return None
+    time = max(0.0, min(1.0, info.reset_after_seconds / (days * 86400))) if info.resets_at else None
+    return (info.remaining_percent / 100, time)
+
+
 def _default_label(widget: UsageWidget) -> str:
     return {
         "five_hour": "5H",
@@ -1351,6 +1367,24 @@ _COLOR_GRAY = (160, 160, 160)
 _COLOR_GREEN = (0, 200, 80)
 _COLOR_YELLOW = (240, 190, 0)
 _COLOR_RED = (230, 60, 50)
+_COLOR_BLUE = (90, 160, 220)
+_COLOR_TRACK = (50, 50, 50)
+
+
+def _draw_bar(
+    draw: ImageDraw.ImageDraw,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    fraction: float,
+    color: tuple[int, int, int],
+) -> None:
+    """Draw a vertical gauge filled from the bottom over a dark track."""
+    draw.rectangle([x, y, x + width - 1, y + height - 1], fill=_COLOR_TRACK)
+    filled = round(height * max(0.0, min(1.0, fraction)))
+    if filled > 0:
+        draw.rectangle([x, y + height - filled, x + width - 1, y + height - 1], fill=color)
 
 
 def render_widget(
@@ -1388,6 +1422,7 @@ def render_widget(
 
     footer: str | None = None
     reference: str | None = None
+    dials: tuple[float, float | None] | None = None
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
         color = _COLOR_RED
@@ -1419,6 +1454,8 @@ def render_widget(
             color = _COLOR_YELLOW
         else:
             color = _COLOR_RED
+        if widget.gauge != "none":
+            dials = gauges(info, widget.limit)
     _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width, reference=reference)
 
     if footer is None and info is not None and info.remaining_amount is None:
@@ -1433,6 +1470,13 @@ def render_widget(
             (180, 180, 180),
             max_width,
         )
+
+    if dials is not None:
+        usage_share, time_share = dials
+        # Start below the label/icon row so the bars never crowd it.
+        _draw_bar(draw, 5, 71, 11, 114, usage_share, color)
+        if time_share is not None:
+            _draw_bar(draw, size - 16, 71, 11, 114, time_share, _COLOR_BLUE)
 
     buf = BytesIO()
     img.save(buf, format="PNG")
