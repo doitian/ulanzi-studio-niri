@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" fill="none">
+  <title>Agent status</title>
+  <rect x="24" y="26" width="80" height="54" rx="10" stroke="currentColor" stroke-width="6"/>
+  <path d="m38 44 10 8-10 8m18 8h14" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="17" y="96" width="19" height="12" rx="3" fill="#F2A65A"/>
+  <rect x="42" y="96" width="19" height="12" rx="3" fill="#E8CF78"/>
+  <rect x="67" y="96" width="19" height="12" rx="3" fill="#7DAADC"/>
+  <rect x="92" y="96" width="19" height="12" rx="3" fill="#85C995"/>
+</svg>
