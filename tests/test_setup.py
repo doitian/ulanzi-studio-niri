@@ -103,7 +103,7 @@ def test_existing_rule_still_reloads(environment):
     setup.RULE_PATH.parent.mkdir()
     setup.RULE_PATH.write_text(setup._resource(setup.RULE_PATH.name))
     setup.install_udev()
-    assert run.call_count == 2
+    assert run.call_count == 3
 
 
 def test_service_keeps_venv_path_and_quotes(environment, monkeypatch):
@@ -156,6 +156,7 @@ def test_admin_setup_only_installs_udev(environment, monkeypatch):
     assert [call.args[0] for call in run.call_args_list] == [
         ["udevadm", "control", "--reload-rules"],
         ["udevadm", "trigger", "--subsystem-match=hidraw"],
+        ["udevadm", "trigger", "--subsystem-match=input"],
     ]
 
 
@@ -167,7 +168,7 @@ def test_admin_setup_failure_can_be_retried(environment, monkeypatch, capsys):
     assert "admin-setup failed" in capsys.readouterr().err
     run.reset_mock(side_effect=True)
     assert cli.main(["admin-setup"]) == 0
-    assert run.call_count == 2
+    assert run.call_count == 3
 
 
 @pytest.mark.parametrize("missing", ["systemctl", "systemd"])

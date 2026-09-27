@@ -49,6 +49,7 @@ def install_udev() -> None:
     # Reload even on a repeat run: a prior attempt may have failed after writing.
     subprocess.run(["udevadm", "control", "--reload-rules"], check=True)
     subprocess.run(["udevadm", "trigger", "--subsystem-match=hidraw"], check=True)
+    subprocess.run(["udevadm", "trigger", "--subsystem-match=input"], check=True)
     print("Installed udev rule. Replug the deck if access is not available yet.")
 
 

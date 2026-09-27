@@ -353,6 +353,47 @@ class DeviceConfig(BaseModel):
     encoder_coalesce_ms: int = Field(default=50, ge=0)
 
 
+class AU05KeyEntry(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    index: int = Field(ge=1, le=4)
+    report: Literal["keyboard", "consumer", "mouse"] = "keyboard"
+    code: int = Field(ge=1, le=65535)
+    on_press: Action | None = None
+    on_release: Action | None = None
+
+    @model_validator(mode="after")
+    def _validate_code(self) -> AU05KeyEntry:
+        maximum = {"keyboard": 255, "consumer": 65535, "mouse": 8}[self.report]
+        if self.code > maximum:
+            raise ValueError(f"{self.report} code must be 1..{maximum}")
+        return self
+
+
+class AU05WheelConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    on_rotate_cw: Action | None = None
+    on_rotate_ccw: Action | None = None
+
+
+class AU05Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+    grab_input: bool = True
+    key: list[AU05KeyEntry] = Field(default_factory=list)
+    wheel: AU05WheelConfig = Field(default_factory=AU05WheelConfig)
+
+    @model_validator(mode="after")
+    def _unique_keys(self) -> AU05Config:
+        if len({key.index for key in self.key}) != len(self.key):
+            raise ValueError("duplicate AU05 key index")
+        if len({(key.report, key.code) for key in self.key}) != len(self.key):
+            raise ValueError("duplicate AU05 key report/code")
+        return self
+
+
 class LabelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -368,6 +409,7 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device: DeviceConfig = Field(default_factory=DeviceConfig)
+    au05: AU05Config = Field(default_factory=AU05Config)
     label: LabelConfig = Field(default_factory=LabelConfig)
     page: list[PageConfig] = Field(default_factory=list)
 
