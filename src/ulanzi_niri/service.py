@@ -26,7 +26,7 @@ from .config import (
 from .pages import PageSet
 from .protocol.device import DeckEvent, DeckEventKind
 from .protocol.manager import open_device
-from .protocol.ulanzi_au05 import AU05Event, UlanziAU05Device, open_au05
+from .protocol.ulanzi_au05 import open_au05
 from .protocol.ulanzi_d200x import (
     WIDE_TILE_POS,
     UlanziD200XDevice,
@@ -107,8 +107,8 @@ class Service:
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
 
-    async def _sync_au05(self, *, restart: bool = False) -> None:
-        if restart or not self._cfg.au05.enabled:
+    async def _sync_au05(self) -> None:
+        if not self._cfg.au05.enabled:
             await self._stop_au05()
         if self._cfg.au05.enabled and not self._stop.is_set() and self._au05_task is None:
             self._au05_task = asyncio.create_task(self._run_au05(), name="au05")
@@ -117,52 +117,16 @@ class Service:
         while not self._stop.is_set():
             device = None
             try:
-                device = open_au05(grab_input=self._cfg.au05.grab_input)
+                device = open_au05()
                 if device is not None:
-                    log.info("AU05 connected; USB keepalive active on both HID interfaces")
-                    await self._serve_au05(device)
+                    log.info("AU05 connected; USB keepalive active (native input unchanged)")
+                    await device.keep_alive()
             except OSError:
                 log.warning("AU05 disconnected or unavailable; retrying", exc_info=True)
             finally:
                 if device is not None:
                     device.close()
             await asyncio.sleep(1.0)
-
-    async def _serve_au05(self, device: UlanziAU05Device) -> None:
-        queue: asyncio.Queue[AU05Event] = asyncio.Queue(maxsize=256)
-
-        async def actions() -> None:
-            while True:
-                await self._handle_au05_event(await queue.get())
-
-        action_task = asyncio.create_task(actions(), name="au05-actions")
-        try:
-            async for event in device:
-                await queue.put(event)
-        finally:
-            action_task.cancel()
-            await asyncio.gather(action_task, return_exceptions=True)
-
-    async def _handle_au05_event(self, event: AU05Event) -> None:
-        cfg = self._cfg.au05
-        if not cfg.enabled:
-            return
-        if event.report == "wheel":
-            action = cfg.wheel.on_rotate_cw if event.delta > 0 else cfg.wheel.on_rotate_ccw
-            source = "au05:wheel:cw" if event.delta > 0 else "au05:wheel:ccw"
-            count = abs(event.delta)
-        else:
-            key = next(
-                (key for key in cfg.key if (key.report, key.code) == (event.report, event.code)),
-                None,
-            )
-            if key is None:
-                return
-            action = key.on_press if event.pressed else key.on_release
-            source = f"au05:key:{key.index}:{'press' if event.pressed else 'release'}"
-            count = 1
-        for _ in range(count):
-            await dispatch(action, ActionContext(self, self._pages.name, source))
 
     async def start_control(self) -> bool:
         path = control_socket_path()
@@ -647,7 +611,6 @@ class Service:
             log.exception("config reload failed; keeping previous")
             return
         log.info("config reloaded")
-        restart_au05 = self._cfg.au05.grab_input != new_cfg.au05.grab_input
         async with self._page_lock:
             self._cfg = new_cfg
             self._pages.replace_config(new_cfg)
@@ -655,7 +618,7 @@ class Service:
                 await self._device.set_label_style(new_cfg.label.model_dump(), force=True)
                 await self._render_current_page()
                 self._start_wide_tile_worker()
-        await self._sync_au05(restart=restart_au05)
+        await self._sync_au05()
 
 
 async def run_service(config_path: Path) -> None:

@@ -16,33 +16,9 @@ brightness = 70
 stats_interval_ms = 1000
 encoder_coalesce_ms = 50
 
-# Optional Ulanzi Vibe Key AU05. Bindings are global, independent of D200X pages.
-# Both HID interfaces stay open for USB keepalive whenever enabled and detected.
+# AU05 USB keepalive only; preserves keys/wheel programmed in Windows and keyd mappings.
 [au05]
 enabled = false
-grab_input = true
-
-[[au05.key]]
-index = 1 # Voice
-code = 0x01
-on_press = { type = "media", cmd = "play-pause" }
-
-[[au05.key]]
-index = 2 # Enter
-code = 0x28
-on_press = { type = "media", cmd = "next" }
-
-[[au05.key]]
-index = 3 # Esc
-code = 0x29
-on_press = { type = "media", cmd = "prev" }
-
-# Add index = 4 for wheel click with its observed report/code (see docs/au05.md).
-# The reference driver does not document the wheel-click report.
-
-[au05.wheel]
-on_rotate_cw = { type = "media", cmd = "vol-up" }
-on_rotate_ccw = { type = "media", cmd = "vol-down" }
 
 [label]
 align = "bottom"

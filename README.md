@@ -2,9 +2,8 @@
 
 [![PyPI version](https://img.shields.io/pypi/v/ulanzi-studio-niri)](https://pypi.org/project/ulanzi-studio-niri/)
 
-A Linux daemon that drives the **Ulanzi Stream Controller D200X** and optionally
-supports the **Ulanzi Vibe Key AU05**, integrating them with the
-[Niri](https://github.com/YaLTeR/niri) Wayland compositor.
+A Linux daemon that drives the **Ulanzi Stream Controller D200X** and integrates
+it with the [Niri](https://github.com/YaLTeR/niri) Wayland compositor.
 
 Buttons can:
 
@@ -235,18 +234,6 @@ and `on_press_rotate_cw` / `on_press_rotate_ccw`. Click fires on release and is
 cancelled if the knob turned while held. Unset press-rotate keys fall through
 to the free-rotate actions. An explicit `{ type = "noop" }` press-rotate
 binding silences that direction instead.
-
-### Optional AU05 support
-
-Set `[au05].enabled = true` to connect an AU05 (`fff1:00dd`) when detected,
-independently of whether a D200X is attached. Both HID interfaces are held open
-for **USB Keepalive / Anti-Disconnect**. Four key bindings (Voice, Enter, Esc,
-and wheel click) and clockwise/counterclockwise wheel actions use the existing
-action types. Native input is grabbed by default to avoid duplicate actions.
-
-Run `sudo ulanzi-niri admin-setup` again after upgrading for AU05 permissions.
-See [AU05 configuration and hardware validation](docs/au05.md) for examples,
-report capture, and the pending wheel-click mapping.
 
 ## Installation
 
