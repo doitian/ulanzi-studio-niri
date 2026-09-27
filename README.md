@@ -40,7 +40,7 @@ ulanzi-niri agent-status --json     # read cached agent counts
 - [Configuration, pages, and icons](docs/guide.md#configuration)
 - [AI usage widgets](docs/guide.md#ai-usage-widgets) · [Agent status](docs/guide.md#agent-status)
 - [Keyboard control](docs/guide.md#keyboard-control)
-- [D200X inputs](docs/guide.md#hardware)
+- [D200X inputs](docs/guide.md#hardware) · [AU05 keepalive](docs/guide.md#au05-keepalive)
 - [Releases](docs/guide.md#releases) · [Changelog](CHANGELOG.md)
 
 ## Development

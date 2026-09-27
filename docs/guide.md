@@ -21,6 +21,9 @@ Buttons can:
 The wide bottom-right LCD displays a clock (digital or dial, optionally with
 date/weekday), system stats, or live encoder information.
 
+The daemon can also keep a separate Ulanzi AU05 (VibeKey) macropad awake via a
+USB keepalive; see [AU05 keepalive](#au05-keepalive).
+
 ## AI usage widgets
 
 LCD buttons can show remaining Claude, Codex, OpenCode Go, Kimi Code, and
@@ -238,6 +241,27 @@ and `on_press_rotate_cw` / `on_press_rotate_ccw`. Click fires on release and is
 cancelled if the knob turned while held. Unset press-rotate keys fall through
 to the free-rotate actions. An explicit `{ type = "noop" }` press-rotate
 binding silences that direction instead.
+
+## AU05 keepalive
+
+The **Ulanzi AU05** (VibeKey, vid:pid `fff1:00dd`) is a separate macropad whose
+firmware reboots after ~4 seconds of USB idle unless both of its HID interfaces
+are held open. Enable the keepalive to hold them open:
+
+```toml
+[au05]
+enabled = true
+```
+
+It is disabled by default. When enabled, the daemon opens both hidraw
+interfaces (read-only, non-blocking) and drains their reports; it sends no USB
+writes and never grabs the input event devices, so the keys and wheel
+programmed with the Windows tool — and any keyd mappings on top — keep working
+unchanged. The bundled udev rule installed by `admin-setup` already covers
+`fff1:00dd`; replug the AU05 after installing it. An absent or unplugged AU05
+is tolerated: the daemon retries every second and resumes the keepalive when
+the device returns. Keepalive technique adapted from
+[kubja/ulanzi-vibekey](https://github.com/kubja/ulanzi-vibekey).
 
 ## Installation
 
