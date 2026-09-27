@@ -1,3 +1,6 @@
 # Ulanzi Stream Controller D200X (vid:pid 2207:0019)
 # Allow members of the input group to access both HID interfaces.
 KERNEL=="hidraw*", ATTRS{idVendor}=="2207", ATTRS{idProduct}=="0019", MODE="0660", GROUP="input", TAG+="uaccess"
+
+# AU05: keep both HID interfaces open to prevent idle USB disconnects.
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="fff1", ATTRS{idProduct}=="00dd", MODE="0660", GROUP="input", TAG+="uaccess"

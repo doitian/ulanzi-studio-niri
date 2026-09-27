@@ -16,6 +16,10 @@ brightness = 70
 stats_interval_ms = 1000
 encoder_coalesce_ms = 50
 
+# AU05 USB keepalive only; preserves keys/wheel programmed in Windows and keyd mappings.
+[au05]
+enabled = false
+
 [label]
 align = "bottom"
 color = "CDCDCD"

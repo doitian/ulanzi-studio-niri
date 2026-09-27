@@ -353,6 +353,12 @@ class DeviceConfig(BaseModel):
     encoder_coalesce_ms: int = Field(default=50, ge=0)
 
 
+class AU05Config(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = False
+
+
 class LabelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -368,6 +374,7 @@ class Config(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     device: DeviceConfig = Field(default_factory=DeviceConfig)
+    au05: AU05Config = Field(default_factory=AU05Config)
     label: LabelConfig = Field(default_factory=LabelConfig)
     page: list[PageConfig] = Field(default_factory=list)
 

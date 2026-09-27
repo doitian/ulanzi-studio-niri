@@ -26,6 +26,7 @@ from .config import (
 from .pages import PageSet
 from .protocol.device import DeckEvent, DeckEventKind
 from .protocol.manager import open_device
+from .protocol.ulanzi_au05 import open_au05
 from .protocol.ulanzi_d200x import (
     WIDE_TILE_POS,
     UlanziD200XDevice,
@@ -71,6 +72,7 @@ class Service:
         self._page_lock = asyncio.Lock()
         self._control_server: asyncio.AbstractServer | None = None
         self._control_path: Path | None = None
+        self._au05_task: asyncio.Task[None] | None = None
 
     # ------------------------------------------------------------------ public lifecycle
     async def run(self) -> None:
@@ -78,6 +80,7 @@ class Service:
         await self.start_control()
         reload_task = asyncio.create_task(self._watch_config(), name="config-watcher")
         try:
+            await self._sync_au05()
             while not self._stop.is_set():
                 await self._connect_and_serve()
                 if self._stop.is_set():
@@ -86,6 +89,8 @@ class Service:
                 await asyncio.sleep(2.0)
         finally:
             reload_task.cancel()
+            await asyncio.gather(reload_task, return_exceptions=True)
+            await self._stop_au05()
             await self.stop_control()
             if self._wide is not None:
                 await self._wide.stop()
@@ -94,6 +99,34 @@ class Service:
 
     async def stop(self) -> None:
         self._stop.set()
+        await self._stop_au05()
+
+    async def _stop_au05(self) -> None:
+        task, self._au05_task = self._au05_task, None
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    async def _sync_au05(self) -> None:
+        if not self._cfg.au05.enabled:
+            await self._stop_au05()
+        if self._cfg.au05.enabled and not self._stop.is_set() and self._au05_task is None:
+            self._au05_task = asyncio.create_task(self._run_au05(), name="au05")
+
+    async def _run_au05(self) -> None:
+        while not self._stop.is_set():
+            device = None
+            try:
+                device = open_au05()
+                if device is not None:
+                    log.info("AU05 connected; USB keepalive active (native input unchanged)")
+                    await device.keep_alive()
+            except OSError:
+                log.warning("AU05 disconnected or unavailable; retrying", exc_info=True)
+            finally:
+                if device is not None:
+                    device.close()
+            await asyncio.sleep(1.0)
 
     async def start_control(self) -> bool:
         path = control_socket_path()
@@ -585,6 +618,7 @@ class Service:
                 await self._device.set_label_style(new_cfg.label.model_dump(), force=True)
                 await self._render_current_page()
                 self._start_wide_tile_worker()
+        await self._sync_au05()
 
 
 async def run_service(config_path: Path) -> None:
