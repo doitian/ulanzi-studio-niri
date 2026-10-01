@@ -6,7 +6,9 @@ import asyncio
 import base64
 import io
 import json
+import sqlite3
 from datetime import UTC, datetime
+from pathlib import Path
 
 import pytest
 from PIL import Image, ImageDraw
@@ -539,7 +541,8 @@ def test_opencode_go_key_from_auth_file(monkeypatch, tmp_path) -> None:
     assert ai_usage._opencode_go_key() == "stored-key"
 
 
-def test_fetch_opencode_go(monkeypatch) -> None:
+def test_fetch_opencode_go(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
     monkeypatch.setattr(ai_usage, "_opencode_go_key", lambda: "test-key")
     monkeypatch.setattr(
         ai_usage,
@@ -559,6 +562,124 @@ def test_fetch_opencode_go(monkeypatch) -> None:
     assert limits["rolling"]["remaining_percent"] == 75
     assert limits["weekly"]["remaining_percent"] == 60
     assert limits["monthly"]["remaining_percent"] == 90
+
+
+_GO_USAGE = {
+    "usage": {"rolling": {"status": "ok", "percent": 25, "resetsAt": "2099-01-01T00:00:00Z"}}
+}
+
+
+def _opencode_db(tmp_path, value: dict) -> Path:
+    directory = tmp_path / "opencode"
+    directory.mkdir(exist_ok=True)
+    path = directory / "opencode.db"
+    with sqlite3.connect(path) as db:
+        db.execute(
+            "CREATE TABLE credential (id text PRIMARY KEY, integration_id text, label text NOT NULL,"
+            " value text NOT NULL, connector_id text, method_id text, active integer,"
+            " time_created integer NOT NULL, time_updated integer NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO credential VALUES ('cred_1', 'opencode', 'Default', ?, NULL, NULL, 1, 1, 1)",
+            (json.dumps(value),),
+        )
+    return path
+
+
+def _console_value(expires: int) -> dict:
+    return {
+        "type": "oauth",
+        "methodID": "device",
+        "access": "old-access",
+        "refresh": "old-refresh",
+        "expires": expires,
+        "metadata": {"server": "https://console.test", "orgID": "org_1", "orgName": "Org"},
+    }
+
+
+def test_opencode_go_usage_with_console_oauth(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    _opencode_db(tmp_path, _console_value(4102444800000))
+    calls = []
+
+    def request_json(url, token, _timeout, *, extra_headers=None):
+        calls.append((url, token, extra_headers))
+        return _GO_USAGE
+
+    monkeypatch.setattr(ai_usage, "_request_json", request_json)
+
+    assert ai_usage._opencode_go_usage(5) == _GO_USAGE
+    assert calls == [(ai_usage._OPENCODE_GO_CONSOLE_USAGE_URL, "old-access", {"x-org-id": "org_1"})]
+
+
+def test_opencode_console_token_refreshes_and_writes_back(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    path = _opencode_db(tmp_path, _console_value(1000))
+    posts = []
+
+    def post(url, values, _timeout, **kwargs):
+        posts.append((url, values, kwargs.get("json_body")))
+        return {"access_token": "new-access", "refresh_token": "new-refresh", "expires_in": 3600}
+
+    monkeypatch.setattr(ai_usage, "_post_form_json", post)
+    credential = ai_usage._opencode_console_credential()
+
+    assert ai_usage._opencode_console_access_token(credential, 5) == "new-access"
+    assert posts == [
+        (
+            "https://console.test/auth/device/token",
+            {
+                "grant_type": "refresh_token",
+                "refresh_token": "old-refresh",
+                "client_id": "opencode-cli",
+            },
+            True,
+        )
+    ]
+    with sqlite3.connect(path) as db:
+        stored = json.loads(db.execute("SELECT value FROM credential").fetchone()[0])
+    assert stored["access"] == "new-access"
+    assert stored["refresh"] == "new-refresh"
+    assert stored["metadata"]["orgID"] == "org_1"
+
+
+def test_opencode_console_refresh_keeps_newer_credential(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    path = _opencode_db(tmp_path, _console_value(1000))
+    credential = ai_usage._opencode_console_credential()
+    with sqlite3.connect(path) as db:
+        db.execute("UPDATE credential SET value = '{}'")
+    monkeypatch.setattr(
+        ai_usage,
+        "_post_form_json",
+        lambda *_args, **_kwargs: {"access_token": "new-access", "expires_in": 3600},
+    )
+
+    with pytest.raises(RuntimeError, match="changed while refreshing"):
+        ai_usage._opencode_console_access_token(credential, 5)
+
+
+def test_opencode_go_usage_falls_back_to_api_key(monkeypatch, tmp_path) -> None:
+    monkeypatch.delenv("OPENCODE_GO_API_KEY", raising=False)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path))
+    _opencode_db(tmp_path, _console_value(4102444800000))
+    (tmp_path / "opencode" / "auth.json").write_text(
+        json.dumps({"opencode-go": {"type": "api", "key": "stored-key"}})
+    )
+    monkeypatch.setattr(
+        ai_usage, "_opencode_console_access_token", lambda *_args, **_kwargs: "access"
+    )
+
+    def request_json(url, token, _timeout, *, extra_headers=None):
+        if url == ai_usage._OPENCODE_GO_CONSOLE_USAGE_URL:
+            raise ai_usage._HTTPStatusError(401, "HTTP 401")
+        assert (url, token) == (ai_usage._OPENCODE_GO_USAGE_URL, "stored-key")
+        return _GO_USAGE
+
+    monkeypatch.setattr(ai_usage, "_request_json", request_json)
+
+    assert ai_usage._opencode_go_usage(5) == _GO_USAGE
 
 
 def test_moonshot_credential_from_environment(monkeypatch) -> None:

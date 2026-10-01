@@ -53,9 +53,12 @@ limit = "rolling"           # rolling | weekly | monthly
 label = "GO 5H"
 ```
 
-Its API key is read from the `opencode-go` entry in
-`$XDG_DATA_HOME/opencode/auth.json` (normally
-`~/.local/share/opencode/auth.json`). Set `OPENCODE_GO_API_KEY` to override it.
+When you sign in to an OpenCode Console account in `opencode`, the widget uses
+that OAuth login from `$XDG_DATA_HOME/opencode/opencode.db` (normally
+`~/.local/share/opencode/opencode.db`), refreshing near-expiry tokens and writing
+the rotated tokens back. Otherwise, or if the console request fails, it uses the
+`opencode-go` API key in `auth.json` in the same directory. Set
+`OPENCODE_GO_API_KEY` to always use a specific key.
 
 xAI (Grok) reports SuperGrok remaining weekly allowance from `grok login`
 credentials in `~/.grok/auth.json` (override with `GROK_HOME` or

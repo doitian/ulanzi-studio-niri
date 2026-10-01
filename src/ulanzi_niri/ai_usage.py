@@ -15,8 +15,10 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import tempfile
 from collections.abc import Awaitable, Callable
+from contextlib import closing
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -73,6 +75,9 @@ _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
 _CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 _CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
+_OPENCODE_GO_CONSOLE_USAGE_URL = "https://opencode.ai/inference/go/v1/usage"
+_OPENCODE_CONSOLE_URL = "https://opencode.ai/console"
+_OPENCODE_CLIENT_ID = "opencode-cli"
 _MOONSHOT_BALANCE_URL_AI = "https://api.moonshot.ai/v1/users/me/balance"
 _MOONSHOT_BALANCE_URL_CN = "https://api.moonshot.cn/v1/users/me/balance"
 _XAI_USAGE_URL = "https://cli-chat-proxy.grok.com/v1/billing?format=credits"
@@ -278,17 +283,18 @@ def _post_form_json(
     timeout: float,
     *,
     extra_headers: dict[str, str] | None = None,
+    json_body: bool = False,
 ) -> dict:
     headers = {
         "Accept": "application/json",
-        "Content-Type": "application/x-www-form-urlencoded",
+        "Content-Type": "application/json" if json_body else "application/x-www-form-urlencoded",
         "User-Agent": "ulanzi-niri/1.0",
     }
     if extra_headers:
         headers.update(extra_headers)
     request = Request(
         url,
-        data=urlencode(values).encode(),
+        data=(json.dumps(values) if json_body else urlencode(values)).encode(),
         headers=headers,
         method="POST",
     )
@@ -352,6 +358,7 @@ def _refresh_token(
     timeout: float,
     *,
     extra_headers: dict[str, str] | None = None,
+    json_body: bool = False,
 ) -> dict:
     if not refresh_token:
         raise RuntimeError("credential expired and no refresh token is available; log in again")
@@ -360,6 +367,7 @@ def _refresh_token(
         {"grant_type": "refresh_token", "refresh_token": refresh_token, "client_id": client_id},
         timeout,
         extra_headers=extra_headers,
+        json_body=json_body,
     )
     if not isinstance(result.get("access_token"), str) or not result["access_token"]:
         raise RuntimeError(f"refresh response from {url} is missing access_token")
@@ -561,14 +569,18 @@ def _fetch_codex(timeout: float) -> dict:
         return _provider_error(str(exc))
 
 
+def _opencode_data_dir() -> Path:
+    data_home = os.environ.get("XDG_DATA_HOME", "").strip()
+    root = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
+    return root / "opencode"
+
+
 def _opencode_go_key() -> str:
     key = os.environ.get("OPENCODE_GO_API_KEY", "").strip()
     if key:
         return key
 
-    data_home = os.environ.get("XDG_DATA_HOME", "").strip()
-    root = Path(data_home).expanduser() if data_home else Path.home() / ".local" / "share"
-    path = root / "opencode" / "auth.json"
+    path = _opencode_data_dir() / "auth.json"
     credential = _read_json(path).get("opencode-go")
     if not isinstance(credential, dict):
         raise RuntimeError("opencode-go token not found — run `opencode` and use `/connect`")
@@ -578,9 +590,142 @@ def _opencode_go_key() -> str:
     return stored_key
 
 
+@dataclass
+class _ConsoleCredential:
+    """OpenCode Console OAuth login stored in OpenCode's SQLite database."""
+
+    path: Path
+    id: str
+    raw: str
+    value: dict
+
+
+def _opencode_console_credential() -> _ConsoleCredential | None:
+    path = _opencode_data_dir() / "opencode.db"
+    if not path.exists():
+        return None
+    try:
+        with closing(sqlite3.connect(path, timeout=5)) as db:
+            row = db.execute(
+                "SELECT id, value FROM credential WHERE integration_id = 'opencode' "
+                "ORDER BY active DESC, time_updated DESC LIMIT 1"
+            ).fetchone()
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"could not read credentials at {path}: {exc}") from exc
+    if row is None:
+        return None
+    try:
+        value = json.loads(row[1])
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"could not read credentials at {path}: {exc}") from exc
+    if not isinstance(value, dict) or value.get("type") != "oauth":
+        return None
+    return _ConsoleCredential(path, str(row[0]), str(row[1]), value)
+
+
+def _write_console_credential(credential: _ConsoleCredential, value: dict) -> None:
+    """Store a rotated console token unless OpenCode replaced the row meanwhile."""
+    raw = json.dumps(value, separators=(",", ":"))
+    now = int(datetime.now(UTC).timestamp() * 1000)
+    try:
+        with closing(sqlite3.connect(credential.path, timeout=5)) as db, db:
+            updated = db.execute(
+                "UPDATE credential SET value = ?, time_updated = ? WHERE id = ? AND value = ?",
+                (raw, now, credential.id, credential.raw),
+            ).rowcount
+    except sqlite3.Error as exc:
+        raise RuntimeError(f"could not write credentials at {credential.path}: {exc}") from exc
+    if not updated:
+        raise RuntimeError(
+            f"credentials at {credential.path} changed while refreshing; keeping newer credential"
+        )
+    credential.raw = raw
+    credential.value = value
+
+
+def _opencode_console_access_token(
+    credential: _ConsoleCredential, timeout: float, *, force_refresh: bool = False
+) -> str:
+    value = credential.value
+    token = value.get("access")
+    if not isinstance(token, str) or not token:
+        raise RuntimeError("opencode console token not found — sign in to OpenCode Console")
+    expires_at = float(value.get("expires") or 0) / 1000
+    if force_refresh or (
+        expires_at and expires_at <= datetime.now(UTC).timestamp() + _REFRESH_SKEW_SECONDS
+    ):
+        metadata = value.get("metadata")
+        metadata = dict(metadata) if isinstance(metadata, dict) else {}
+        server = metadata.get("server")
+        server = server.rstrip("/") if isinstance(server, str) and server else _OPENCODE_CONSOLE_URL
+        refreshed = _refresh_token(
+            f"{server}/auth/device/token",
+            _OPENCODE_CLIENT_ID,
+            str(value.get("refresh", "")),
+            timeout,
+            json_body=True,
+        )
+        org_id = refreshed.get("org_id")
+        if isinstance(org_id, str) and org_id:
+            if metadata.get("orgID") != org_id:
+                metadata["orgName"] = org_id
+            metadata["orgID"] = org_id
+        expires_in = float(refreshed.get("expires_in", 0))
+        _write_console_credential(
+            credential,
+            {
+                **value,
+                "access": refreshed["access_token"],
+                "refresh": refreshed.get("refresh_token") or value.get("refresh", ""),
+                "expires": (
+                    int((datetime.now(UTC).timestamp() + expires_in) * 1000)
+                    if expires_in > 0
+                    else 0
+                ),
+                "metadata": metadata,
+            },
+        )
+        token = str(refreshed["access_token"])
+    return token
+
+
+def _opencode_console_headers(credential: _ConsoleCredential) -> dict[str, str]:
+    metadata = credential.value.get("metadata")
+    org_id = metadata.get("orgID") if isinstance(metadata, dict) else None
+    return {"x-org-id": org_id} if isinstance(org_id, str) and org_id else {}
+
+
+def _opencode_go_usage(timeout: float) -> dict:
+    """Fetch Go usage, preferring an OpenCode Console login over the legacy API key.
+
+    ``OPENCODE_GO_API_KEY`` wins. Otherwise the console OAuth credential is used,
+    falling back to the ``opencode-go`` key in auth.json when that fails.
+    """
+    if os.environ.get("OPENCODE_GO_API_KEY", "").strip():
+        return _request_json(_OPENCODE_GO_USAGE_URL, _opencode_go_key(), timeout)
+    console = _opencode_console_credential()
+    if console is None:
+        return _request_json(_OPENCODE_GO_USAGE_URL, _opencode_go_key(), timeout)
+    try:
+        return _request_json_retry_unauthorized(
+            _OPENCODE_GO_CONSOLE_USAGE_URL,
+            _opencode_console_access_token(console, timeout),
+            timeout,
+            lambda: _opencode_console_access_token(console, timeout, force_refresh=True),
+            extra_headers=_opencode_console_headers(console),
+        )
+    except RuntimeError as exc:
+        try:
+            key = _opencode_go_key()
+        except RuntimeError:
+            raise exc from None
+        log.warning("OpenCode Console usage fetch failed, using API key: %s", exc)
+        return _request_json(_OPENCODE_GO_USAGE_URL, key, timeout)
+
+
 def _fetch_opencode_go(timeout: float) -> dict:
     try:
-        usage = _request_json(_OPENCODE_GO_USAGE_URL, _opencode_go_key(), timeout)
+        usage = _opencode_go_usage(timeout)
         windows = usage.get("usage")
         if not isinstance(windows, dict):
             raise RuntimeError("opencode-go usage response missing usage object")
