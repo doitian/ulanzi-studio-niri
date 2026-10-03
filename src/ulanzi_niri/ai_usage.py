@@ -52,6 +52,9 @@ class UsageLimit:
     reset_after_seconds: float
     remaining_amount: float | None = None  # pay-as-you-go balance (Moonshot)
     currency: str = ""
+    # Banked limit resets (Claude and Codex) with their known expiries, earliest first.
+    reset_credits: int = 0
+    reset_expiries: tuple[str, ...] = ()
 
 
 class FetchStatus(Enum):
@@ -68,10 +71,11 @@ class UsageFetchResult:
 
 USAGE_TTL_SECONDS = USAGE_REFRESH_SECONDS
 
-_CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
+_CLAUDE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
 _CLAUDE_TOKEN_URL = "https://platform.claude.com/v1/oauth/token"
 _CLAUDE_CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
 _CODEX_USAGE_URL = "https://chatgpt.com/backend-api/wham/usage"
+_CODEX_RESET_CREDITS_URL = "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits"
 _CODEX_TOKEN_URL = "https://auth.openai.com/oauth/token"
 _CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 _OPENCODE_GO_USAGE_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -462,6 +466,79 @@ def _limit(used: float, resets_at: str | int | float) -> dict:
     }
 
 
+def _iso_time(value: object) -> str | None:
+    """Normalize epoch seconds or an ISO timestamp to a UTC ISO string."""
+    timestamp: float | None = None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        timestamp = float(value)
+    elif isinstance(value, str):
+        try:
+            timestamp = datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            return None
+    if timestamp is None or timestamp <= 0:
+        return None
+    return datetime.fromtimestamp(timestamp, UTC).isoformat()
+
+
+def _claude_resets(data: dict) -> dict:
+    """Banked limit resets from cedar_ember: a count plus known expiries, earliest first.
+
+    Only grants the server marks usable right now are counted; one expiry entry
+    per reset, so the list can be shorter than the count when an expiry is
+    unknown.
+    """
+    resets: dict = {"count": 0, "expiries": []}
+    block = data.get("cedar_ember")
+    if not isinstance(block, dict) or block.get("eligible") is not True:
+        return resets
+    grants = block.get("grants")
+    if not isinstance(grants, list):
+        return resets
+    for grant in grants:
+        if not isinstance(grant, dict):
+            continue
+        left = grant.get("resets_left")
+        if (
+            grant.get("usable_now") is not True
+            or grant.get("paused") is True
+            or not isinstance(left, int)
+            or isinstance(left, bool)
+            or left <= 0
+        ):
+            continue
+        resets["count"] += left
+        expiry = _iso_time(grant.get("ends_at"))
+        if expiry is not None:
+            resets["expiries"].extend([expiry] * min(left, 64))
+    resets["expiries"] = sorted(resets["expiries"])[: resets["count"]]
+    return resets
+
+
+def _codex_resets(data: dict, details: dict | None = None) -> dict:
+    """Banked limit resets from rate_limit_reset_credits.
+
+    The usage response only carries the count; expiries come from the optional
+    reset-credits endpoint (``details``).
+    """
+    block = data.get("rate_limit_reset_credits")
+    count = block.get("available_count") if isinstance(block, dict) else 0
+    if not isinstance(count, int) or isinstance(count, bool) or count <= 0:
+        return {"count": 0, "expiries": []}
+    credits = details.get("credits") if isinstance(details, dict) else None
+    expiries = []
+    if isinstance(credits, list):
+        for credit in credits:
+            if not isinstance(credit, dict) or credit.get("status") != "available":
+                continue
+            expiry = _iso_time(credit.get("expires_at"))
+            if expiry is not None:
+                expiries.append(expiry)
+    return {"count": count, "expiries": sorted(expiries)[:count]}
+
+
 def _account(email: str, limits: dict, *, error: str | None = None) -> dict:
     result = {"email": email, "active": True, "limits": limits}
     if error:
@@ -491,7 +568,12 @@ def _fetch_claude(timeout: float) -> dict:
         path = Path.home() / ".claude" / ".credentials.json"
         raw_credential = _read_json(path)
         token = _claude_access_token(path, raw_credential, timeout)
-        headers = {"Anthropic-Beta": "oauth-2025-04-20", "User-Agent": "claude-code/0.0.0-dev"}
+        headers = {
+            "Anthropic-Beta": "oauth-2025-04-20",
+            # cedar_ember is only returned to a released claude-cli >= 2.1.280
+            # in this exact User-Agent shape.
+            "User-Agent": "claude-cli/2.1.288 (external, cli)",
+        }
         usage = _request_json_retry_unauthorized(
             _CLAUDE_USAGE_URL,
             token,
@@ -522,7 +604,11 @@ def _fetch_claude(timeout: float) -> dict:
                     scoped_key = f"seven_day_{slug}" if slug else None
                 if scoped_key and scoped_key not in limits:
                     limits[scoped_key] = _limit(float(entry.get("percent", 0)), entry["resets_at"])
-        return {"accounts": [_account("", limits)]}
+        account = _account("", limits)
+        resets = _claude_resets(usage)
+        account["reset_credits"] = resets["count"]
+        account["reset_expiries"] = resets["expiries"]
+        return {"accounts": [account]}
     except (RuntimeError, TypeError, ValueError) as exc:
         log.warning("Claude usage fetch failed: %s", exc)
         return _provider_error(str(exc))
@@ -563,7 +649,24 @@ def _fetch_codex(timeout: float) -> dict:
             key = _codex_window_key(int(window.get("limit_window_seconds", 0)))
             limits[key] = _limit(float(window.get("used_percent", 0)), window["reset_at"])
         id_token = tokens.get("id_token", "") if isinstance(tokens, dict) else ""
-        return {"accounts": [_account(_jwt_email(str(id_token)), limits)]}
+        account = _account(_jwt_email(str(id_token)), limits)
+        resets = _codex_resets(usage)
+        if resets["count"] > 0:
+            try:
+                details = _request_json_retry_unauthorized(
+                    _CODEX_RESET_CREDITS_URL,
+                    token,
+                    timeout,
+                    lambda: _codex_access_token(path, raw_credential, timeout, force_refresh=True),
+                )
+            except RuntimeError as exc:
+                # The count stands without expiries.
+                log.warning("Codex reset credits fetch failed: %s", exc)
+            else:
+                resets = _codex_resets(usage, details)
+        account["reset_credits"] = resets["count"]
+        account["reset_expiries"] = resets["expiries"]
+        return {"accounts": [account]}
     except (RuntimeError, TypeError, ValueError) as exc:
         log.warning("Codex usage fetch failed: %s", exc)
         return _provider_error(str(exc))
@@ -1214,12 +1317,24 @@ def resolve_limit(providers: dict, provider: str, account: str, limit: str) -> U
         return None
     percent = lim.get("remaining_percent")
     amount = lim.get("remaining_amount")
+    credits = target.get("reset_credits")
+    expiries = target.get("reset_expiries")
     return UsageLimit(
         remaining_percent=float(percent) if percent is not None else None,
         resets_at=str(lim.get("resets_at", "")),
         reset_after_seconds=float(lim.get("reset_after_seconds", 0.0)),
         remaining_amount=float(amount) if amount is not None else None,
         currency=str(lim.get("currency", "")),
+        reset_credits=(
+            credits
+            if isinstance(credits, int) and not isinstance(credits, bool) and credits > 0
+            else 0
+        ),
+        reset_expiries=(
+            tuple(value for value in expiries if isinstance(value, str))
+            if isinstance(expiries, list)
+            else ()
+        ),
     )
 
 
@@ -1513,7 +1628,63 @@ _COLOR_GREEN = (0, 200, 80)
 _COLOR_YELLOW = (240, 190, 0)
 _COLOR_RED = (230, 60, 50)
 _COLOR_BLUE = (90, 160, 220)
+_COLOR_WHITE = (255, 255, 255)
 _COLOR_TRACK = (50, 50, 50)
+
+
+def _parse_time(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00")).astimezone(UTC)
+    except ValueError:
+        return None
+
+
+def _reset_color(expiry: datetime | None, now: datetime) -> tuple[int, int, int]:
+    """Pip color for a banked reset expiry: red ≤ 3 days out, yellow ≤ 7, else white."""
+    if expiry is None:
+        return _COLOR_WHITE
+    days = (expiry - now).total_seconds() / 86400
+    if days <= 3:
+        return _COLOR_RED
+    if days <= 7:
+        return _COLOR_YELLOW
+    return _COLOR_WHITE
+
+
+def _draw_reset_pips(
+    draw: ImageDraw.ImageDraw,
+    cx: int,
+    y: int,
+    count: int,
+    expiries: list[datetime | None],
+    now: datetime,
+) -> None:
+    """One pip per banked reset, colored by its expiry; more than three collapse to `×N`."""
+    radius, gap = 5, 16
+    shown = 1 if count > 3 else count
+    label = f"×{count}" if count > 3 else ""
+    font = load_font(18)
+    label_width = 0
+    if label:
+        bbox = draw.textbbox((0, 0), label, font=font)
+        label_width = bbox[2] - bbox[0] + 6
+    width = (shown - 1) * gap + 2 * radius + label_width
+    x = cx - width // 2 + radius
+    for index in range(shown):
+        expiry = expiries[index] if index < len(expiries) else None
+        draw.ellipse(
+            [x - radius, y - radius, x + radius, y + radius],
+            fill=_reset_color(expiry, now),
+        )
+        x += gap
+    if label:
+        bbox = draw.textbbox((0, 0), label, font=font)
+        draw.text(
+            (x - radius + 6 - bbox[0], y - (bbox[3] - bbox[1]) // 2 - bbox[1]),
+            label,
+            font=font,
+            fill=_COLOR_WHITE,
+        )
 
 
 def _draw_bar(
@@ -1568,6 +1739,7 @@ def render_widget(
     footer: str | None = None
     reference: str | None = None
     dials: tuple[float, float | None] | None = None
+    pips: tuple[int, list[datetime | None]] | None = None
     if status is FetchStatus.TIMEOUT:
         pct = "TO"
         color = _COLOR_RED
@@ -1601,6 +1773,10 @@ def render_widget(
             color = _COLOR_RED
         if widget.gauge != "none":
             dials = gauges(info, widget.limit)
+        if widget.limit == "seven_day" and info.reset_credits > 0:
+            parsed = [_parse_time(value) for value in info.reset_expiries]
+            known = sorted(expiry for expiry in parsed if expiry is not None)
+            pips = (info.reset_credits, known + [None] * (len(parsed) - len(known)))
     _draw_fit(draw, (cx, size // 2), pct, 56, color, max_width, reference=reference)
 
     if footer is None and info is not None and info.remaining_amount is None:
@@ -1622,6 +1798,9 @@ def render_widget(
         _draw_bar(draw, 5, 71, 11, 114, usage_share, color)
         if time_share is not None:
             _draw_bar(draw, size - 16, 71, 11, 114, time_share, _COLOR_BLUE)
+
+    if pips is not None:
+        _draw_reset_pips(draw, cx, round(size * 0.72), pips[0], pips[1], datetime.now(UTC))
 
     buf = BytesIO()
     img.save(buf, format="PNG")

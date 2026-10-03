@@ -131,7 +131,10 @@ url = "https://opencode.ai/workspace/wrk_xxxxx/go"
 ```
 
 Use `seven_day_fable` to show Claude's weekly Fable model allowance. Each
-widget shows the remaining percentage and reset time. Provider data is fetched
+widget shows the remaining percentage and reset time. Claude and Codex 7-day
+widgets also draw one pip per banked limit reset below the percentage (more
+than three collapse to `●×N`); each pip is red when that reset expires within
+3 days, yellow within 7 days, and white otherwise. Provider data is fetched
 concurrently in the background (never blocking the event loop) and updated
 automatically when the fetch completes. Results are cached for 30 minutes to
 limit provider API traffic. Claude, Codex, and Kimi Code access tokens near
@@ -151,7 +154,9 @@ ulanzi-niri ai-usage
 
 Use `ulanzi-niri ai-usage --json` for machine-readable output. It returns a
 `providers` object containing account limits and provider errors, or `null` if
-no data is available. The command reads the daemon's in-memory cache without
+no data is available. Claude and Codex accounts carry `reset_credits` (the
+number of banked limit resets) and `reset_expiries` (the known expiries,
+earliest first; it can be shorter than the count when an expiry is unknown). The command reads the daemon's in-memory cache without
 contacting providers or waiting for an in-progress refresh. Restart the daemon
 after upgrading to enable this command. `--timeout` controls how long to wait
 for the daemon's reply (default: 2 seconds).

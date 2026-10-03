@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import copy
 import io
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -468,6 +469,106 @@ def test_render_widget_gauge_bars() -> None:
     assert img.getpixel((185, 100)) == ai_usage._COLOR_TRACK
 
 
+def test_reset_color_thresholds() -> None:
+    now = datetime(2030, 3, 10, tzinfo=UTC)
+    day = timedelta(days=1)
+    assert ai_usage._reset_color(now + 2 * day, now) == ai_usage._COLOR_RED
+    assert ai_usage._reset_color(now + 3 * day, now) == ai_usage._COLOR_RED
+    assert ai_usage._reset_color(now + 5 * day, now) == ai_usage._COLOR_YELLOW
+    assert ai_usage._reset_color(now + 7 * day, now) == ai_usage._COLOR_YELLOW
+    assert ai_usage._reset_color(now + 8 * day, now) == ai_usage._COLOR_WHITE
+    assert ai_usage._reset_color(None, now) == ai_usage._COLOR_WHITE
+
+
+class _RecordingDraw:
+    def __init__(self) -> None:
+        self.ellipses = []
+        self.texts = []
+
+    def ellipse(self, box, fill=None) -> None:
+        self.ellipses.append((box, fill))
+
+    def textbbox(self, _xy, text, font=None):
+        return (0, 0, 8 * len(text), 12)
+
+    def text(self, _xy, text, font=None, fill=None) -> None:
+        self.texts.append(text)
+
+
+def test_draw_reset_pips_one_per_reset_colored_by_expiry() -> None:
+    now = datetime(2030, 3, 10, tzinfo=UTC)
+    soon = now + timedelta(days=1)
+    later = now + timedelta(days=30)
+    draw = _RecordingDraw()
+    ai_usage._draw_reset_pips(draw, 98, 140, 3, [soon, later], now)
+    assert [fill for _, fill in draw.ellipses] == [
+        ai_usage._COLOR_RED,
+        ai_usage._COLOR_WHITE,
+        ai_usage._COLOR_WHITE,
+    ]
+    assert draw.texts == []
+
+
+def test_draw_reset_pips_collapse_above_three() -> None:
+    now = datetime(2030, 3, 10, tzinfo=UTC)
+    draw = _RecordingDraw()
+    ai_usage._draw_reset_pips(draw, 98, 140, 5, [now + timedelta(days=1)], now)
+    assert [fill for _, fill in draw.ellipses] == [ai_usage._COLOR_RED]
+    assert draw.texts == ["×5"]
+
+
+def test_draw_reset_pips_pixel_positions() -> None:
+    img = Image.new("RGB", (196, 196), (0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    now = datetime(2030, 3, 10, tzinfo=UTC)
+    soon = now + timedelta(days=1)
+    later = now + timedelta(days=30)
+    ai_usage._draw_reset_pips(draw, 98, 140, 2, [soon, later], now)
+    assert img.getpixel((90, 140)) == ai_usage._COLOR_RED
+    assert img.getpixel((106, 140)) == ai_usage._COLOR_WHITE
+    assert img.getpixel((98, 140)) == (0, 0, 0)
+
+
+def test_resolve_limit_carries_reset_credits() -> None:
+    providers = copy.deepcopy(PROVIDERS)
+    account = providers["codex"]["accounts"][0]
+    account["reset_credits"] = 2
+    account["reset_expiries"] = ["2030-03-20T00:00:00Z", 5]
+    info = resolve_limit(providers, "codex", "", "seven_day")
+    assert info is not None
+    assert info.reset_credits == 2
+    assert info.reset_expiries == ("2030-03-20T00:00:00Z",)
+    info = resolve_limit(PROVIDERS, "codex", "", "seven_day")
+    assert info is not None
+    assert info.reset_credits == 0
+    assert info.reset_expiries == ()
+
+
+def test_render_widget_reset_pips_on_seven_day_only(monkeypatch) -> None:
+    calls = []
+    monkeypatch.setattr(
+        ai_usage,
+        "_draw_reset_pips",
+        lambda _draw, _cx, _y, count, expiries, _now: calls.append((count, expiries)),
+    )
+    providers = copy.deepcopy(PROVIDERS)
+    providers["claude"]["accounts"][0]["reset_credits"] = 2
+    providers["claude"]["accounts"][0]["reset_expiries"] = [
+        "2099-01-02T00:00:00+00:00",
+        "bad",
+    ]
+
+    widget = UsageWidget(pos=1, provider="claude", limit="seven_day")
+    render_widget(widget, providers)
+
+    assert calls == [(2, [datetime(2099, 1, 2, tzinfo=UTC), None])]
+
+    widget = UsageWidget(pos=1, provider="claude", limit="five_hour")
+    render_widget(widget, providers)
+
+    assert len(calls) == 1
+
+
 def test_render_widget_gauge_draws_nothing_when_off_or_hour_window() -> None:
     for gauge, limit in (("none", "seven_day"), ("bars", "five_hour")):
         widget = UsageWidget(pos=1, provider="claude", limit=limit, gauge=gauge)
@@ -892,6 +993,94 @@ def test_claude_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     assert written == [credential]
 
 
+def test_claude_resets_from_cedar_ember() -> None:
+    grant = {
+        "resets_left": 1,
+        "usable_now": True,
+        "paused": False,
+        "ends_at": "2030-03-20T00:00:00Z",
+    }
+    result = ai_usage._claude_resets(
+        {
+            "cedar_ember": {
+                "eligible": True,
+                "grants": [
+                    grant,
+                    {**grant, "resets_left": 2, "ends_at": "2030-03-19T00:00:00+00:00"},
+                    {**grant, "resets_left": 1, "ends_at": None},
+                    {**grant, "usable_now": False},
+                    {**grant, "paused": True},
+                    {**grant, "resets_left": 0},
+                    {**grant, "resets_left": "1"},
+                    None,
+                ],
+            }
+        }
+    )
+    assert result == {
+        "count": 4,
+        "expiries": [
+            "2030-03-19T00:00:00+00:00",
+            "2030-03-19T00:00:00+00:00",
+            "2030-03-20T00:00:00+00:00",
+        ],
+    }
+    for block in ({"eligible": False, "grants": [grant]}, None, "nope"):
+        assert ai_usage._claude_resets({"cedar_ember": block}) == {"count": 0, "expiries": []}
+    assert ai_usage._claude_resets({}) == {"count": 0, "expiries": []}
+
+
+def test_fetch_claude_reads_cedar_ember_resets(monkeypatch, tmp_path) -> None:
+    config_dir = tmp_path / ".claude"
+    config_dir.mkdir()
+    (config_dir / ".credentials.json").write_text(
+        json.dumps(
+            {
+                "claudeAiOauth": {
+                    "accessToken": "claude-access",
+                    "refreshToken": "claude-refresh",
+                    "expiresAt": 0,
+                }
+            }
+        )
+    )
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    calls = []
+
+    def fake_request(url, _token, _timeout, _refresh, *, extra_headers=None):
+        calls.append((url, extra_headers))
+        return {
+            "five_hour": {"utilization": 20, "resets_at": "2099-03-18T17:00:00Z"},
+            "cedar_ember": {
+                "eligible": True,
+                "grants": [
+                    {
+                        "id": "secret-handle",
+                        "resets_left": 2,
+                        "usable_now": True,
+                        "paused": False,
+                        "ends_at": "2099-04-20T00:00:00Z",
+                    }
+                ],
+            },
+        }
+
+    monkeypatch.setattr(ai_usage, "_request_json_retry_unauthorized", fake_request)
+
+    provider = ai_usage._fetch_claude(5)
+
+    assert calls[0][0] == "https://api.anthropic.com/api/oauth/usage?cedar_ember=1"
+    assert calls[0][1]["User-Agent"].startswith("claude-cli/2.1.")
+    assert calls[0][1]["User-Agent"].endswith(" (external, cli)")
+    account = provider["accounts"][0]
+    assert account["reset_credits"] == 2
+    assert account["reset_expiries"] == [
+        "2099-04-20T00:00:00+00:00",
+        "2099-04-20T00:00:00+00:00",
+    ]
+    assert "secret-handle" not in json.dumps(provider)
+
+
 def test_grok_limits_missing_percent_is_unused() -> None:
     limits = ai_usage._grok_limits(
         {
@@ -1293,6 +1482,134 @@ def test_codex_refreshes_expired_token(monkeypatch, tmp_path) -> None:
     assert token == "new-access"
     assert credential["tokens"]["refresh_token"] == "new-refresh"
     assert credential["tokens"]["id_token"] == "new-id"
+
+
+def test_codex_resets() -> None:
+    usage = {"rate_limit_reset_credits": {"available_count": 2}}
+    assert ai_usage._codex_resets(usage) == {"count": 2, "expiries": []}
+    details = {
+        "credits": [
+            {"status": "redeemed", "expires_at": "2030-03-18T00:00:00Z"},
+            {"status": "available", "expires_at": "2030-03-25T00:00:00Z"},
+            {"status": "available", "expires_at": "2030-03-21T00:00:00Z"},
+            {"status": "available", "expires_at": "bad"},
+        ]
+    }
+    assert ai_usage._codex_resets(usage, details) == {
+        "count": 2,
+        "expiries": ["2030-03-21T00:00:00+00:00", "2030-03-25T00:00:00+00:00"],
+    }
+    for value in ({"available_count": -1}, {"available_count": "2"}, None, "nope"):
+        assert ai_usage._codex_resets({"rate_limit_reset_credits": value}) == {
+            "count": 0,
+            "expiries": [],
+        }
+
+
+def _codex_auth(tmp_path: Path) -> None:
+    exp = int(datetime.now(UTC).timestamp()) + 3600
+    payload = base64.urlsafe_b64encode(json.dumps({"exp": exp}).encode()).rstrip(b"=").decode()
+    id_payload = (
+        base64.urlsafe_b64encode(json.dumps({"email": "me@example.com"}).encode())
+        .rstrip(b"=")
+        .decode()
+    )
+    config_dir = tmp_path / ".codex"
+    config_dir.mkdir()
+    (config_dir / "auth.json").write_text(
+        json.dumps(
+            {
+                "tokens": {
+                    "access_token": f"header.{payload}.signature",
+                    "id_token": f"header.{id_payload}.signature",
+                    "refresh_token": "codex-refresh",
+                }
+            }
+        )
+    )
+
+
+_CODEX_USAGE = {
+    "rate_limit": {
+        "primary_window": {
+            "used_percent": 3,
+            "reset_at": 1893456000,
+            "limit_window_seconds": 18000,
+        },
+        "secondary_window": {
+            "used_percent": 57,
+            "reset_at": 1894051200,
+            "limit_window_seconds": 604800,
+        },
+    },
+    "rate_limit_reset_credits": {"available_count": 1},
+}
+
+
+def test_fetch_codex_reset_credits(monkeypatch, tmp_path) -> None:
+    _codex_auth(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    urls = []
+
+    def fake_request(url, _token, _timeout, _refresh, *, extra_headers=None):
+        urls.append(url)
+        if url.endswith("/rate-limit-reset-credits"):
+            return {
+                "credits": [
+                    {
+                        "id": "secret-credit",
+                        "status": "available",
+                        "expires_at": "2099-03-21T00:00:00Z",
+                    }
+                ]
+            }
+        return _CODEX_USAGE
+
+    monkeypatch.setattr(ai_usage, "_request_json_retry_unauthorized", fake_request)
+
+    provider = ai_usage._fetch_codex(5)
+
+    assert urls == [
+        ai_usage._CODEX_USAGE_URL,
+        "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
+    ]
+    account = provider["accounts"][0]
+    assert account["reset_credits"] == 1
+    assert account["reset_expiries"] == ["2099-03-21T00:00:00+00:00"]
+    assert "secret-credit" not in json.dumps(provider)
+
+
+def test_fetch_codex_keeps_reset_count_when_credit_fetch_fails(monkeypatch, tmp_path) -> None:
+    _codex_auth(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+
+    def fake_request(url, *_args, **_kwargs):
+        if url.endswith("/rate-limit-reset-credits"):
+            raise RuntimeError("HTTP 500")
+        return _CODEX_USAGE
+
+    monkeypatch.setattr(ai_usage, "_request_json_retry_unauthorized", fake_request)
+
+    account = ai_usage._fetch_codex(5)["accounts"][0]
+    assert account["reset_credits"] == 1
+    assert account["reset_expiries"] == []
+
+
+def test_fetch_codex_skips_reset_credits_when_none_banked(monkeypatch, tmp_path) -> None:
+    _codex_auth(tmp_path)
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    urls = []
+
+    def fake_request(url, *_args, **_kwargs):
+        urls.append(url)
+        return {"rate_limit": _CODEX_USAGE["rate_limit"]}
+
+    monkeypatch.setattr(ai_usage, "_request_json_retry_unauthorized", fake_request)
+
+    account = ai_usage._fetch_codex(5)["accounts"][0]
+    assert account["reset_credits"] == 0
+    assert account["reset_expiries"] == []
+    assert not any(url.endswith("/rate-limit-reset-credits") for url in urls)
 
 
 def test_request_refreshes_and_retries_once_after_401(monkeypatch) -> None:
