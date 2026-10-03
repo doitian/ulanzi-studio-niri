@@ -146,6 +146,17 @@ HTTP 429 responses are not retried automatically. Press any usage widget to
 request a manual refresh. Manual refreshes are throttled to one fetch every
 90 seconds.
 
+When the providers are only reachable through a VPN, set `tun_device` once in
+the root `[ai_usage]` section; the daemon then calls provider APIs only while
+that interface is up. Skipped fetches keep the cached data and are retried on
+the failure backoff schedule, so widgets update on their own once the tunnel
+comes up:
+
+```toml
+[ai_usage]
+tun_device = "tun0"
+```
+
 The same cached data is available immediately from the running daemon:
 
 ```sh

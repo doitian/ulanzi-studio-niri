@@ -20,6 +20,11 @@ encoder_coalesce_ms = 50
 [au05]
 enabled = false
 
+# Shared options for all [[page.ai_usage]] widgets.
+# [ai_usage]
+# Only call provider APIs while this interface is up (e.g. a VPN tunnel):
+# tun_device = "tun0"
+
 [label]
 align = "bottom"
 color = "CDCDCD"

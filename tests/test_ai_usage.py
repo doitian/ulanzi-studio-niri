@@ -1847,3 +1847,67 @@ async def test_usage_fetcher_does_not_retry_rate_limit(monkeypatch) -> None:
     await fetcher._task
     assert fetcher.get().status is FetchStatus.ERROR
     assert fetcher._retry_task is None
+
+
+def test_tun_device_up(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(ai_usage, "_SYS_CLASS_NET", tmp_path)
+    assert ai_usage.tun_device_up("tun0") is False
+
+    device = tmp_path / "tun0"
+    device.mkdir()
+    (device / "flags").write_text("0x0\n")
+    assert ai_usage.tun_device_up("tun0") is False
+
+    (device / "flags").write_text("0x41\n")  # IFF_UP | IFF_RUNNING
+    assert ai_usage.tun_device_up("tun0") is True
+
+    (device / "flags").write_text("garbage\n")
+    assert ai_usage.tun_device_up("tun0") is False
+
+
+async def test_usage_fetcher_skips_fetch_when_tun_device_down(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+        nonlocal calls
+        calls += 1
+        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(ai_usage, "tun_device_up", lambda name: False)
+    monkeypatch.setattr(ai_usage, "RETRY_BACKOFF_SECONDS", (0,))
+
+    fetcher = UsageFetcher(tun_device="tun0")
+    fetcher.refresh()
+    await fetcher._task
+    assert calls == 0
+    assert fetcher.get() is None
+    assert fetcher._fetched_at is None
+    assert fetcher._retry_task is not None
+
+    await fetcher._retry_task
+    assert calls == 0
+
+    monkeypatch.setattr(ai_usage, "tun_device_up", lambda name: True)
+    fetcher.set_tun_device("tun0")
+    fetcher.refresh(force=True)
+    await fetcher._task
+    assert calls == 1
+    assert fetcher.get().status is FetchStatus.OK
+
+
+async def test_usage_fetcher_without_tun_device_always_fetches(monkeypatch) -> None:
+    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    monkeypatch.setattr(
+        ai_usage,
+        "tun_device_up",
+        lambda name: pytest.fail("tun_device_up called without a configured device"),
+    )
+
+    fetcher = UsageFetcher()
+    fetcher.refresh()
+    await fetcher._task
+    assert fetcher.get().status is FetchStatus.OK

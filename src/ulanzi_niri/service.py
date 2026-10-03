@@ -64,7 +64,7 @@ class Service:
         self._encoder_flush_task: dict[tuple[int, bool], asyncio.Task] = {}
         self._widget_tasks: set[asyncio.Task[None]] = set()
         self._brightness: int = self._cfg.device.brightness
-        self._usage = UsageFetcher()
+        self._usage = UsageFetcher(tun_device=self._cfg.ai_usage.tun_device)
         self._usage.set_on_update(self._on_usage_update)
         self._agents = AgentStatusFetcher()
         self._agents.set_on_update(self._on_agent_update)
@@ -614,6 +614,7 @@ class Service:
         async with self._page_lock:
             self._cfg = new_cfg
             self._pages.replace_config(new_cfg)
+            self._usage.set_tun_device(new_cfg.ai_usage.tun_device)
             if self._device is not None:
                 await self._device.set_label_style(new_cfg.label.model_dump(), force=True)
                 await self._render_current_page()

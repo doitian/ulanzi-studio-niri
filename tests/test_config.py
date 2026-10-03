@@ -569,3 +569,52 @@ def test_encoder_unknown_key_rejected() -> None:
             on_spin = { type = "media", cmd = "mute" }
             """
         )
+
+
+def test_ai_usage_tun_device_defaults_empty() -> None:
+    cfg = _load(
+        """
+        [[page]]
+        name = "x"
+        """
+    )
+    assert cfg.ai_usage.tun_device == ""
+
+
+def test_ai_usage_tun_device_root_section() -> None:
+    cfg = _load(
+        """
+        [ai_usage]
+        tun_device = "tun0"
+
+        [[page]]
+        name = "x"
+        """
+    )
+    assert cfg.ai_usage.tun_device == "tun0"
+
+
+def test_ai_usage_tun_device_rejects_invalid_name() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [ai_usage]
+            tun_device = "../tun0"
+
+            [[page]]
+            name = "x"
+            """
+        )
+
+
+def test_ai_usage_unknown_key_rejected() -> None:
+    with pytest.raises(ValidationError):
+        _load(
+            """
+            [ai_usage]
+            tun = "tun0"
+
+            [[page]]
+            name = "x"
+            """
+        )

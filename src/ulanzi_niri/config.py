@@ -376,6 +376,24 @@ class AU05Config(BaseModel):
     enabled: bool = False
 
 
+class AIUsageConfig(BaseModel):
+    """Shared options for all [[page.ai_usage]] widgets."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    tun_device: str = ""  # only call provider APIs while this interface is up
+
+    @field_validator("tun_device")
+    @classmethod
+    def _validate_tun_device(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            return ""
+        if "/" in v or v in {".", ".."} or len(v) > 15:
+            raise ValueError(f"tun_device {v!r} must be a network interface name")
+        return v
+
+
 class LabelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -392,6 +410,7 @@ class Config(BaseModel):
 
     device: DeviceConfig = Field(default_factory=DeviceConfig)
     au05: AU05Config = Field(default_factory=AU05Config)
+    ai_usage: AIUsageConfig = Field(default_factory=AIUsageConfig)
     label: LabelConfig = Field(default_factory=LabelConfig)
     page: list[PageConfig] = Field(default_factory=list)
 

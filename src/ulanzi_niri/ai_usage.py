@@ -103,6 +103,19 @@ class _HTTPStatusError(RuntimeError):
         self.status = status
 
 
+_SYS_CLASS_NET = Path("/sys/class/net")
+_IFF_UP = 0x1
+
+
+def tun_device_up(name: str) -> bool:
+    """True when the interface exists and is administratively up (IFF_UP)."""
+    try:
+        flags = int((_SYS_CLASS_NET / name / "flags").read_text().strip(), 16)
+    except (OSError, ValueError):
+        return False
+    return bool(flags & _IFF_UP)
+
+
 class UsageFetcher:
     """Serve cached provider usage and refresh it in the background.
 
@@ -118,10 +131,15 @@ class UsageFetcher:
     expired Claude token needing ``claude /login``) are cached as-is and never
     retried in the background after the request's one refresh-token attempt —
     the renderer surfaces them as ``401``.
+
+    With ``tun_device`` set, provider APIs are only contacted while that
+    interface is up; otherwise the fetch is skipped (keeping the cached
+    result) and retried later on the same backoff schedule.
     """
 
-    def __init__(self, *, ttl: float = USAGE_TTL_SECONDS) -> None:
+    def __init__(self, *, ttl: float = USAGE_TTL_SECONDS, tun_device: str = "") -> None:
         self._ttl = ttl
+        self._tun_device = tun_device
         self._result: UsageFetchResult | None = None
         self._fetched_at: float | None = None
         self._task: asyncio.Task | None = None
@@ -131,6 +149,9 @@ class UsageFetcher:
 
     def set_on_update(self, callback: Callable[[], Awaitable[None]]) -> None:
         self._on_update = callback
+
+    def set_tun_device(self, tun_device: str) -> None:
+        self._tun_device = tun_device
 
     def get(self) -> UsageFetchResult | None:
         return self._result
@@ -163,6 +184,10 @@ class UsageFetcher:
         return self._result
 
     async def _run(self) -> None:
+        if self._tun_device and not tun_device_up(self._tun_device):
+            log.info("usage fetch skipped: tun device %s is down", self._tun_device)
+            self._schedule_retry()
+            return
         result = await fetch_usage()
         self._result = result
         self._fetched_at = asyncio.get_running_loop().time()
