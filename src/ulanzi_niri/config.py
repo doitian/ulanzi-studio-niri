@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import tomllib
@@ -17,6 +18,8 @@ from .protocol.ulanzi_d200x import (
     EXTRA_BUTTON_POS_BASE,
     WIDE_TILE_POS,
 )
+
+log = logging.getLogger(__name__)
 
 LCD_POS_RANGE = set(BUTTON_GEOMETRY.keys())
 EXTRA_POS_RANGE = set(range(EXTRA_BUTTON_POS_BASE, EXTRA_BUTTON_POS_BASE + EXTRA_BUTTON_COUNT))
@@ -306,6 +309,9 @@ class PageConfig(BaseModel):
     default: bool = False
     button: list[ButtonEntry] = Field(default_factory=list)
     encoder: list[EncoderEntry] = Field(default_factory=list)
+    ai_usage: list[UsageWidget] = Field(default_factory=list)
+    # Deprecated alias for `ai_usage`; entries are merged into `ai_usage` on
+    # load. Use [[page.ai_usage]] instead of [[page.widget]] in new configs.
     widget: list[UsageWidget] = Field(default_factory=list)
     agent_status: list[AgentStatusWidget] = Field(default_factory=list)
     wide_tile: WideTileEntry | None = None
@@ -323,6 +329,17 @@ class PageConfig(BaseModel):
         return v
 
     @model_validator(mode="after")
+    def _merge_legacy_widget(self) -> PageConfig:
+        if self.widget:
+            log.warning(
+                "page %r: [[page.widget]] is deprecated; rename to [[page.ai_usage]]",
+                self.name,
+            )
+            self.ai_usage = [*self.widget, *self.ai_usage]
+            self.widget = []
+        return self
+
+    @model_validator(mode="after")
     def _no_dupe_pos(self) -> PageConfig:
         seen: set[int] = set()
         for b in self.button:
@@ -334,7 +351,7 @@ class PageConfig(BaseModel):
             if e.index in seen_e:
                 raise ValueError(f"page {self.name!r}: duplicate encoder index {e.index}")
             seen_e.add(e.index)
-        widget_pos = [w.pos for w in self.widget] + [w.pos for w in self.agent_status]
+        widget_pos = [w.pos for w in self.ai_usage] + [w.pos for w in self.agent_status]
         if len(widget_pos) != len(set(widget_pos)):
             raise ValueError(f"page {self.name!r}: duplicate widget pos")
         overlap = seen & set(widget_pos)

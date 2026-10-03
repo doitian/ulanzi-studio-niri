@@ -215,7 +215,7 @@ mode = "time-weekday"
 # icon = "ai-usage"
 # # Placeholder: no button actions.
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 1
 # provider = "claude"
 # account = ""
@@ -223,7 +223,7 @@ mode = "time-weekday"
 # label = "5H"
 # icon = "claude-desktop"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 2
 # provider = "claude"
 # account = ""
@@ -231,7 +231,7 @@ mode = "time-weekday"
 # label = "7D"
 # icon = "claude-desktop"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 3
 # provider = "claude"
 # account = ""
@@ -239,7 +239,7 @@ mode = "time-weekday"
 # label = "FABLE"
 # icon = "claude-desktop"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 4
 # provider = "xai"
 # account = ""
@@ -247,7 +247,7 @@ mode = "time-weekday"
 # label = "7D"
 # icon = "xai"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 5
 # provider = "codex"
 # account = ""
@@ -255,7 +255,7 @@ mode = "time-weekday"
 # label = "5H"
 # icon = "chatgpt"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 6
 # provider = "codex"
 # account = ""
@@ -263,7 +263,7 @@ mode = "time-weekday"
 # label = "7D"
 # icon = "chatgpt"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 7
 # provider = "opencode-go"
 # account = ""
@@ -271,7 +271,7 @@ mode = "time-weekday"
 # label = "5H"
 # icon = "opencode"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 8
 # provider = "opencode-go"
 # account = ""
@@ -279,7 +279,7 @@ mode = "time-weekday"
 # label = "7D"
 # icon = "opencode"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 9
 # provider = "opencode-go"
 # account = ""
@@ -292,7 +292,7 @@ mode = "time-weekday"
 # optional MOONSHOT_BASE_URL) or the `moonshotai` / `moonshotai-cn` entries in
 # OpenCode's auth.json; moonshotai-cn targets the China platform (CNY).
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 10
 # provider = "moonshot"
 # account = ""
@@ -306,7 +306,7 @@ mode = "time-weekday"
 # OAuth entry in ~/.pi/agent/auth.json, or the `kimi-code-plan-cn` /
 # `kimi-code-plan-global` API keys in OpenCode's auth.json.
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 11
 # provider = "kimi-code"
 # account = ""
@@ -314,7 +314,7 @@ mode = "time-weekday"
 # label = "5H"
 # icon = "moonshot"
 #
-# [[page.widget]]
+# [[page.ai_usage]]
 # pos = 12
 # provider = "kimi-code"
 # account = ""

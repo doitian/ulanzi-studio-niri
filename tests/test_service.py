@@ -34,7 +34,7 @@ from ulanzi_niri.protocol.device import DeckEvent, DeckEventKind
 @pytest.mark.parametrize("custom_url", [None, "https://example.com/usage"])
 async def test_widget_press_refreshes_usage_and_opens_url(monkeypatch, provider, limit, custom_url):
     widget = UsageWidget(pos=0, provider=provider, limit=limit, url=custom_url)
-    cfg = Config(page=[PageConfig(name="usage", widget=[widget])])
+    cfg = Config(page=[PageConfig(name="usage", ai_usage=[widget])])
     monkeypatch.setattr(service, "load_config", lambda _: cfg)
     app = service.Service("unused.toml")
     app._usage = Mock()
@@ -69,7 +69,7 @@ async def test_following_click_runs_while_widget_fetch_and_browser_are_pending(m
         page=[
             PageConfig(
                 name="usage",
-                widget=[UsageWidget(pos=0, provider="claude", limit="five_hour")],
+                ai_usage=[UsageWidget(pos=0, provider="claude", limit="five_hour")],
                 button=[ButtonEntry(pos=1, on_press=BrightnessAction(type="brightness", delta=-5))],
             )
         ]

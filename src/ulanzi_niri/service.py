@@ -345,15 +345,15 @@ class Service:
 
     async def _render_widget_images(self, page: PageConfig) -> dict[int, bytes]:
         images: dict[int, bytes] = {}
-        if page.widget:
+        if page.ai_usage:
             result = self._usage.get()
             self._usage.refresh()
             if result is None:
-                images.update({w.pos: render_widget(w, {}) for w in page.widget})
+                images.update({w.pos: render_widget(w, {}) for w in page.ai_usage})
             else:
                 providers = (result.data or {}).get("providers", {})
                 images.update(
-                    {w.pos: render_widget(w, providers, status=result.status) for w in page.widget}
+                    {w.pos: render_widget(w, providers, status=result.status) for w in page.ai_usage}
                 )
         if page.agent_status:
             snapshot = self._agents.get()
@@ -370,7 +370,7 @@ class Service:
         return images
 
     async def _on_usage_update(self) -> None:
-        if self._device is not None and self._pages.current.widget:
+        if self._device is not None and self._pages.current.ai_usage:
             await self._render_current_page()
 
     async def _on_agent_update(self) -> None:
@@ -389,7 +389,7 @@ class Service:
         cfg = page.wide_tile or WideTileEntry(mode="clock")
         state = WideTileState(
             config=cfg,
-            widgets=page.widget,
+            widgets=page.ai_usage,
             agent_widgets=page.agent_status,
         )
         if self._wide is not None:
@@ -477,7 +477,7 @@ class Service:
             self._agents.refresh(force=True)
             url = agent.url
         else:
-            widget = next((w for w in page.widget if w.pos == pos), None)
+            widget = next((w for w in page.ai_usage if w.pos == pos), None)
             if widget is None:
                 return
             self._usage.refresh(force=True)

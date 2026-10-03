@@ -30,11 +30,11 @@ LCD buttons can show remaining Claude, Codex, OpenCode Go, Kimi Code, and
 xAI (Grok) plan usage, plus the Moonshot (Kimi API) account balance. The daemon reads credentials
 maintained by `claude /login`, `codex login`, `/login` inside Kimi CLI, and
 OpenCode `/connect`, then
-fetches usage directly from each provider. Configure one `[[page.widget]]` per
+fetches usage directly from each provider. Configure one `[[page.ai_usage]]` per
 provider/window; each renders on the button at its `pos`:
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 1
 provider = "claude"
 account = ""                 # direct integration uses the active CLI account
@@ -46,7 +46,7 @@ icon = "claude-desktop"
 OpenCode Go provides `rolling`, `weekly`, and `monthly` windows:
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 2
 provider = "opencode-go"
 limit = "rolling"           # rolling | weekly | monthly
@@ -65,7 +65,7 @@ credentials in `~/.grok/auth.json` (override with `GROK_HOME` or
 `ULANZI_GROK_CREDENTIALS`):
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 4
 provider = "xai"
 limit = "weekly"           # weekly only
@@ -77,7 +77,7 @@ Kimi for Coding reports the plan's 5-hour and monthly quota from
 `https://api.kimi.com/coding/v1/usages` (override with `KIMI_CODE_BASE_URL`):
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 5
 provider = "kimi-code"
 limit = "five_hour"        # five_hour | monthly
@@ -100,7 +100,7 @@ account balance instead of a percentage, colored green / yellow / red as it
 drops below ¥70 / ¥36 (CNY) or $12 / $6 (USD):
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 3
 provider = "moonshot"
 limit = "balance"           # balance only
@@ -123,7 +123,7 @@ Defaults: `https://claude.ai/new#settings/usage` (Claude),
 `url` on a widget to override:
 
 ```toml
-[[page.widget]]
+[[page.ai_usage]]
 pos = 4
 provider = "opencode-go"
 limit = "rolling"

@@ -171,24 +171,24 @@ def test_cycle_target_missing_page() -> None:
     assert cfg.cycle_target("nope", 1) is None
 
 
-def test_page_widget_parses() -> None:
+def test_page_ai_usage_parses() -> None:
     cfg = _load(
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "codex"
         account = "me@example.com"
         limit = "five_hour"
         label = "Codex 5h"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 2
         provider = "claude"
         limit = "seven_day_fable"
         """
     )
-    widgets = cfg.page[0].widget
+    widgets = cfg.page[0].ai_usage
     assert len(widgets) == 2
     assert widgets[0].pos == 1
     assert widgets[0].provider == "codex"
@@ -200,13 +200,35 @@ def test_page_widget_parses() -> None:
     assert widgets[1].limit == "seven_day_fable"
 
 
+def test_page_widget_deprecated_merges_into_ai_usage(caplog) -> None:
+    with caplog.at_level("WARNING", logger="ulanzi_niri.config"):
+        cfg = _load(
+            """
+            [[page]]
+            name = "x"
+            [[page.widget]]
+            pos = 1
+            provider = "codex"
+            limit = "five_hour"
+            [[page.ai_usage]]
+            pos = 2
+            provider = "claude"
+            limit = "seven_day"
+            """
+        )
+    page = cfg.page[0]
+    assert page.widget == []
+    assert [(w.pos, w.provider) for w in page.ai_usage] == [(1, "codex"), (2, "claude")]
+    assert "[[page.widget]] is deprecated" in caplog.text
+
+
 def test_widget_bad_provider_rejected() -> None:
     with pytest.raises(ValidationError):
         _load(
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "gemini"
             limit = "five_hour"
@@ -219,14 +241,14 @@ def test_widget_gauge_option() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "claude"
         limit = "seven_day"
         gauge = "bars"
         """
     )
-    assert cfg.page[0].widget[0].gauge == "bars"
+    assert cfg.page[0].ai_usage[0].gauge == "bars"
 
 
 def test_widget_gauge_defaults_to_none() -> None:
@@ -234,13 +256,13 @@ def test_widget_gauge_defaults_to_none() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "claude"
         limit = "seven_day"
         """
     )
-    assert cfg.page[0].widget[0].gauge == "none"
+    assert cfg.page[0].ai_usage[0].gauge == "none"
 
 
 def test_widget_bad_gauge_rejected() -> None:
@@ -249,7 +271,7 @@ def test_widget_bad_gauge_rejected() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "claude"
             limit = "seven_day"
@@ -264,7 +286,7 @@ def test_widget_fable_limit_restricted_to_claude() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "codex"
             limit = "seven_day_fable"
@@ -277,21 +299,21 @@ def test_widget_opencode_go_limits() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "opencode-go"
         limit = "rolling"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 2
         provider = "opencode-go"
         limit = "weekly"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 3
         provider = "opencode-go"
         limit = "monthly"
         """
     )
-    assert [widget.limit for widget in cfg.page[0].widget] == ["rolling", "weekly", "monthly"]
+    assert [widget.limit for widget in cfg.page[0].ai_usage] == ["rolling", "weekly", "monthly"]
 
 
 def test_widget_opencode_go_rejects_other_provider_limits() -> None:
@@ -300,7 +322,7 @@ def test_widget_opencode_go_rejects_other_provider_limits() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "opencode-go"
             limit = "five_hour"
@@ -313,13 +335,13 @@ def test_widget_moonshot_balance_parses() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "moonshot"
         limit = "balance"
         """
     )
-    widget = cfg.page[0].widget[0]
+    widget = cfg.page[0].ai_usage[0]
     assert widget.provider == "moonshot"
     assert widget.limit == "balance"
     assert widget.url is None
@@ -331,7 +353,7 @@ def test_widget_moonshot_rejects_other_provider_limits() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "moonshot"
             limit = "weekly"
@@ -345,7 +367,7 @@ def test_widget_balance_rejected_for_other_providers() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "claude"
             limit = "balance"
@@ -358,14 +380,14 @@ def test_widget_url_parses() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "moonshot"
         limit = "balance"
         url = "https://platform.kimi.ai/console/account"
         """
     )
-    assert cfg.page[0].widget[0].url == "https://platform.kimi.ai/console/account"
+    assert cfg.page[0].ai_usage[0].url == "https://platform.kimi.ai/console/account"
 
 
 def test_widget_url_requires_scheme() -> None:
@@ -374,7 +396,7 @@ def test_widget_url_requires_scheme() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "moonshot"
             limit = "balance"
@@ -389,7 +411,7 @@ def test_widget_bad_pos_rejected() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 13
             provider = "claude"
             limit = "five_hour"
@@ -405,7 +427,7 @@ def test_widget_overlap_button_rejected() -> None:
             name = "x"
             [[page.button]]
             pos = 1
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "claude"
             limit = "five_hour"
@@ -445,13 +467,13 @@ def test_widget_xai_weekly_parses() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "xai"
         limit = "weekly"
         """
     )
-    widget = cfg.page[0].widget[0]
+    widget = cfg.page[0].ai_usage[0]
     assert widget.provider == "xai"
     assert widget.limit == "weekly"
 
@@ -462,7 +484,7 @@ def test_widget_xai_rejects_other_limits() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "xai"
             limit = "five_hour"
@@ -475,17 +497,17 @@ def test_widget_kimi_code_limits() -> None:
         """
         [[page]]
         name = "x"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 1
         provider = "kimi-code"
         limit = "five_hour"
-        [[page.widget]]
+        [[page.ai_usage]]
         pos = 2
         provider = "kimi-code"
         limit = "monthly"
         """
     )
-    assert [widget.limit for widget in cfg.page[0].widget] == ["five_hour", "monthly"]
+    assert [widget.limit for widget in cfg.page[0].ai_usage] == ["five_hour", "monthly"]
 
 
 def test_widget_kimi_code_rejects_other_limits() -> None:
@@ -494,7 +516,7 @@ def test_widget_kimi_code_rejects_other_limits() -> None:
             """
             [[page]]
             name = "x"
-            [[page.widget]]
+            [[page.ai_usage]]
             pos = 1
             provider = "kimi-code"
             limit = "seven_day"

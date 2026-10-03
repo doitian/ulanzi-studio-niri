@@ -277,7 +277,7 @@ def test_config_agent_widget_pos_must_not_overlap() -> None:
     with pytest.raises(ValueError, match="duplicate widget pos"):
         PageConfig(
             name="agents",
-            widget=[UsageWidget(pos=0, provider="claude", limit="five_hour")],
+            ai_usage=[UsageWidget(pos=0, provider="claude", limit="five_hour")],
             agent_status=[AgentStatusWidget(pos=0)],
         )
 
