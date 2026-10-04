@@ -5,9 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased](https://github.com/doitian/ulanzi-studio-niri/compare/v2.0.0...HEAD)
+## [Unreleased](https://github.com/doitian/ulanzi-studio-niri/compare/v2.1.0...HEAD)
 
-## [2.1.0](https://github.com/doitian/ulanzi-studio-niri/compare/v2.0.0...HEAD) - Unreleased
+## [2.2.0](https://github.com/doitian/ulanzi-studio-niri/compare/v2.1.0...HEAD) - Unreleased
+
+### Added
+
+- route AI usage API calls through an HTTP proxy ([afcf746](https://github.com/doitian/ulanzi-studio-niri/commit/afcf746d6b4aceac582112cd02c567994f9db234)).
+- show banked Claude and Codex limit resets on 7D AI usage keys ([b4ddddc](https://github.com/doitian/ulanzi-studio-niri/commit/b4ddddc69262c509fd84ead4f32c8c1571552de0)).
+- read OpenCode Go usage with OpenCode Console OAuth ([fff7a7e](https://github.com/doitian/ulanzi-studio-niri/commit/fff7a7eda73a886bcbf1aab091fe022c4704d6f1)).
+- add opt-in AU05 USB keepalive (#11) ([16b15f9](https://github.com/doitian/ulanzi-studio-niri/commit/16b15f96aeb8b605da9ab732f6eeae07765e72cf)).
+
+### Changed
+
+- rename page.widget config key to page.ai_usage ([81001fc](https://github.com/doitian/ulanzi-studio-niri/commit/81001fca7c3ed518e29f5fd342f0a848d59be2ce)).
+- document AU05 USB keepalive ([67abdbd](https://github.com/doitian/ulanzi-studio-niri/commit/67abdbd00840f26281e350e48844bd3230a32600)).
+- remove implementation plans and shorten README (#12) ([a2fe245](https://github.com/doitian/ulanzi-studio-niri/commit/a2fe245030ad630dd55734d15c32e52f466acbfa)).
+
+### Fixed
+
+- cast reset pip label width to int for mypy ([38c1d6f](https://github.com/doitian/ulanzi-studio-niri/commit/38c1d6f86057c64be6c6b62853cb6d0fcd1f35f6)).
+
+## [2.1.0](https://github.com/doitian/ulanzi-studio-niri/compare/v2.0.0...v2.1.0) - 2026-09-23
 
 ### Added
 

@@ -5,6 +5,8 @@
   'Changed': ['Docs', 'Performance Improvements', 'Code Refactoring', 'Dependencies', 'Reverts'],
   'Fixed': ['Bug Fixes'],
 } -%}
+{#- Commits superseded before release, e.g. the tun_device gate replaced by http_proxy. -#}
+{%- set excluded = ['ec40df5de054c027e76d1669dda6349c903bd373'] -%}
 # Changelog
 
 All notable changes to this project will be documented in this file.
@@ -27,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 {%- for title, types in groups.items() %}
 {%- set notes = namespace(commits=[]) %}
 {%- for section in version.sections_list if section.type in types %}
-{%- set notes.commits = notes.commits + section.commits %}
+{%- set notes.commits = notes.commits + (section.commits | rejectattr('hash', 'in', excluded) | list) %}
 {%- endfor %}
 {%- if notes.commits %}
 
