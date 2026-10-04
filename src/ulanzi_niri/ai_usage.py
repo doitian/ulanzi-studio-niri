@@ -1777,7 +1777,7 @@ def _draw_reset_pips(
     label_width = 0
     if label:
         bbox = draw.textbbox((0, 0), label, font=font)
-        label_width = bbox[2] - bbox[0] + 6
+        label_width = int(bbox[2] - bbox[0]) + 6
     width = (shown - 1) * gap + 2 * radius + label_width
     x = cx - width // 2 + radius
     for index in range(shown):
