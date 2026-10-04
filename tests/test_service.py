@@ -56,7 +56,7 @@ async def test_following_click_runs_while_widget_fetch_and_browser_are_pending(m
     fetch_started = asyncio.Event()
     browser_started = asyncio.Event()
 
-    async def slow_fetch(timeout=20.0):
+    async def slow_fetch(timeout=20.0, **_kwargs):
         fetch_started.set()
         await release.wait()
         return ai_usage.UsageFetchResult(ai_usage.FetchStatus.OK, {"providers": {}})
@@ -452,7 +452,7 @@ async def test_control_refresh_usage_runs_in_background(monkeypatch, tmp_path):
         asyncio.get_running_loop().time() - ai_usage.MANUAL_REFRESH_THROTTLE_SECONDS - 1
     )
 
-    async def fetch():
+    async def fetch(**_kwargs):
         await release.wait()
         return updated
 
@@ -492,7 +492,7 @@ async def test_control_refresh_usage_waits_over_socket(monkeypatch, tmp_path):
     app._usage._result = old
     app._usage._fetched_at = asyncio.get_running_loop().time()
 
-    async def fetch():
+    async def fetch(**_kwargs):
         started.set()
         await release.wait()
         return updated

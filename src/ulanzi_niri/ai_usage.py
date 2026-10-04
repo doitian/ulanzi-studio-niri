@@ -1,9 +1,11 @@
 """Fetch and render Claude, Codex, OpenCode Go, Kimi Code, xAI, and Moonshot usage for D200X buttons.
 
 Provider credentials are read from the files maintained by their CLIs. Usage
-is fetched directly from each provider without an additional command-line
-program. Moonshot (Kimi API) is pay-as-you-go, so instead of a rate-limit
-window it reports the remaining account balance.
+is fetched from each provider without an additional command-line program.
+When ``http_proxy`` is configured, those requests are sent only through that
+HTTP proxy and never directly to the provider, including when the proxy is
+down. Moonshot (Kimi API) is pay-as-you-go, so instead of a rate-limit window
+it reports the remaining account balance.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ import sqlite3
 import tempfile
 from collections.abc import Awaitable, Callable
 from contextlib import closing
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import Enum
@@ -26,11 +29,19 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
-from urllib.request import Request, urlopen
+from urllib.request import (
+    BaseHandler,
+    HTTPHandler,
+    HTTPSHandler,
+    ProxyHandler,
+    Request,
+    build_opener,
+    urlopen,
+)
 
 from PIL import Image, ImageDraw
 
-from .config import UsageWidget
+from .config import UsageWidget, split_http_proxy
 from .icons import LABEL_BOTTOM_PADDING, _load_icon_image, resolve_icon_path
 from .icons import _font as load_font
 from .protocol.ulanzi_d200x import STD_ICON
@@ -103,17 +114,91 @@ class _HTTPStatusError(RuntimeError):
         self.status = status
 
 
-_SYS_CLASS_NET = Path("/sys/class/net")
-_IFF_UP = 0x1
+# Set for the duration of a fetch so worker threads use the same proxy.
+_http_proxy: ContextVar[str] = ContextVar("ai_usage_http_proxy", default="")
 
 
-def tun_device_up(name: str) -> bool:
-    """True when the interface exists and is administratively up (IFF_UP)."""
+class _ForcedProxyHandler(BaseHandler):
+    """Apply the configured proxy and never honor ``NO_PROXY``.
+
+    urllib's ``ProxyHandler`` returns without calling ``set_proxy`` when
+    ``proxy_bypass`` matches, and the HTTP handler then connects to the origin.
+    A configured usage proxy must not do that, even if the proxy is down.
+    """
+
+    handler_order = 100
+
+    def __init__(self, scheme: str, hostport: str, user: str | None, password: str | None) -> None:
+        self._scheme = scheme
+        self._hostport = hostport
+        self._user = user
+        self._password = password
+
+    def _force(self, req: Request) -> None:
+        if self._user is not None:
+            token = base64.b64encode(f"{self._user}:{self._password or ''}".encode()).decode(
+                "ascii"
+            )
+            req.add_header("Proxy-authorization", f"Basic {token}")
+        req.set_proxy(self._hostport, self._scheme)
+        return None
+
+    def http_open(self, req: Request) -> None:
+        return self._force(req)
+
+    def https_open(self, req: Request) -> None:
+        return self._force(req)
+
+
+class _ProxyOnlyHTTPHandler(HTTPHandler):
+    """Connect only to the configured proxy."""
+
+    def __init__(self, proxy_host: str) -> None:
+        super().__init__()
+        self._proxy_host = proxy_host
+
+    def http_open(self, req: Request):  # type: ignore[no-untyped-def]
+        if req.host != self._proxy_host or not req.has_proxy():
+            raise URLError("refusing direct connection while http_proxy is configured")
+        return super().http_open(req)
+
+
+class _ProxyOnlyHTTPSHandler(HTTPSHandler):
+    """Connect only to the configured proxy."""
+
+    def __init__(self, proxy_host: str) -> None:
+        super().__init__()
+        self._proxy_host = proxy_host
+
+    def https_open(self, req: Request):  # type: ignore[no-untyped-def]
+        # HTTPS via an HTTP proxy keeps the origin in ``_tunnel_host`` and the
+        # TCP destination in ``host``. A missing tunnel would dial the API.
+        if req.host != self._proxy_host or not getattr(req, "_tunnel_host", None):
+            raise URLError("refusing direct connection while http_proxy is configured")
+        return super().https_open(req)
+
+
+def _proxy_opener(proxy: str):
     try:
-        flags = int((_SYS_CLASS_NET / name / "flags").read_text().strip(), 16)
-    except (OSError, ValueError):
-        return False
-    return bool(flags & _IFF_UP)
+        scheme, user, password, hostport = split_http_proxy(proxy)
+    except ValueError as exc:
+        # Fail closed: an unusable proxy must not fall through to a direct dial.
+        raise URLError(f"unusable http_proxy {proxy!r}: {exc}") from exc
+    # Empty ProxyHandler replaces the default env-proxy handler so NO_PROXY
+    # and https_proxy cannot add a direct path.
+    return build_opener(
+        ProxyHandler({}),
+        _ForcedProxyHandler(scheme, hostport, user, password),
+        _ProxyOnlyHTTPHandler(hostport),
+        _ProxyOnlyHTTPSHandler(hostport),
+    )
+
+
+def _urlopen(request: Request, timeout: float):
+    proxy = _http_proxy.get()
+    if not proxy:
+        return urlopen(request, timeout=timeout)  # noqa: S310
+    return _proxy_opener(proxy).open(request, timeout=timeout)
 
 
 class UsageFetcher:
@@ -132,14 +217,14 @@ class UsageFetcher:
     retried in the background after the request's one refresh-token attempt —
     the renderer surfaces them as ``401``.
 
-    With ``tun_device`` set, provider APIs are only contacted while that
-    interface is up; otherwise the fetch is skipped (keeping the cached
-    result) and retried later on the same backoff schedule.
+    With ``http_proxy`` set, provider requests are sent only through that HTTP
+    proxy. A down proxy fails the fetch (cached data is kept) and is retried
+    on the same backoff; the request is not sent directly to the API server.
     """
 
-    def __init__(self, *, ttl: float = USAGE_TTL_SECONDS, tun_device: str = "") -> None:
+    def __init__(self, *, ttl: float = USAGE_TTL_SECONDS, http_proxy: str = "") -> None:
         self._ttl = ttl
-        self._tun_device = tun_device
+        self._http_proxy = http_proxy
         self._result: UsageFetchResult | None = None
         self._fetched_at: float | None = None
         self._task: asyncio.Task | None = None
@@ -150,8 +235,8 @@ class UsageFetcher:
     def set_on_update(self, callback: Callable[[], Awaitable[None]]) -> None:
         self._on_update = callback
 
-    def set_tun_device(self, tun_device: str) -> None:
-        self._tun_device = tun_device
+    def set_http_proxy(self, http_proxy: str) -> None:
+        self._http_proxy = http_proxy
 
     def get(self) -> UsageFetchResult | None:
         return self._result
@@ -184,11 +269,7 @@ class UsageFetcher:
         return self._result
 
     async def _run(self) -> None:
-        if self._tun_device and not tun_device_up(self._tun_device):
-            log.info("usage fetch skipped: tun device %s is down", self._tun_device)
-            self._schedule_retry()
-            return
-        result = await fetch_usage()
+        result = await fetch_usage(proxy=self._http_proxy)
         self._result = result
         self._fetched_at = asyncio.get_running_loop().time()
         log.debug("usage fetch complete: status=%s", result.status)
@@ -226,23 +307,27 @@ class UsageFetcher:
                 log.exception("usage update callback failed")
 
 
-async def fetch_usage(timeout: float = 20.0) -> UsageFetchResult:
+async def fetch_usage(timeout: float = 20.0, *, proxy: str = "") -> UsageFetchResult:
     """Fetch all provider usage concurrently using their CLI credentials."""
-    tasks = [
-        asyncio.to_thread(_fetch_claude, timeout),
-        asyncio.to_thread(_fetch_codex, timeout),
-        asyncio.to_thread(_fetch_opencode_go, timeout),
-        asyncio.to_thread(_fetch_moonshot, timeout),
-        asyncio.to_thread(_fetch_xai, timeout),
-        asyncio.to_thread(_fetch_kimi_code, timeout),
-    ]
+    token = _http_proxy.set(proxy)
     try:
-        claude, codex, opencode_go, moonshot, xai, kimi_code = await asyncio.wait_for(
-            asyncio.gather(*tasks), timeout=timeout + 1
-        )
-    except TimeoutError:
-        log.error("usage fetch timed out after %.0fs", timeout)
-        return UsageFetchResult(FetchStatus.TIMEOUT)
+        tasks = [
+            asyncio.to_thread(_fetch_claude, timeout),
+            asyncio.to_thread(_fetch_codex, timeout),
+            asyncio.to_thread(_fetch_opencode_go, timeout),
+            asyncio.to_thread(_fetch_moonshot, timeout),
+            asyncio.to_thread(_fetch_xai, timeout),
+            asyncio.to_thread(_fetch_kimi_code, timeout),
+        ]
+        try:
+            claude, codex, opencode_go, moonshot, xai, kimi_code = await asyncio.wait_for(
+                asyncio.gather(*tasks), timeout=timeout + 1
+            )
+        except TimeoutError:
+            log.error("usage fetch timed out after %.0fs", timeout)
+            return UsageFetchResult(FetchStatus.TIMEOUT)
+    finally:
+        _http_proxy.reset(token)
 
     providers = {
         "claude": claude,
@@ -283,7 +368,7 @@ def _request_json(
     if extra_headers:
         headers.update(extra_headers)
     try:
-        with urlopen(Request(url, headers=headers), timeout=timeout) as response:  # noqa: S310
+        with _urlopen(Request(url, headers=headers), timeout) as response:  # noqa: S310
             raw = response.read(1024 * 1024 + 1)
     except HTTPError as exc:
         detail = exc.read(512).decode("utf-8", "replace").strip()
@@ -328,7 +413,7 @@ def _post_form_json(
         method="POST",
     )
     try:
-        with urlopen(request, timeout=min(timeout, 5.0)) as response:  # noqa: S310
+        with _urlopen(request, min(timeout, 5.0)) as response:  # noqa: S310
             raw = response.read(1024 * 1024 + 1)
     except HTTPError as exc:
         detail = exc.read(512).decode("utf-8", "replace").strip()

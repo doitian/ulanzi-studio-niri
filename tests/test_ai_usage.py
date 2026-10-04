@@ -1704,7 +1704,7 @@ async def test_fetch_usage_timeout(monkeypatch) -> None:
 async def test_usage_fetcher_refreshes_in_background(monkeypatch) -> None:
     calls = 0
 
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    async def fake_fetch(timeout: float = 20.0, **_kwargs) -> ai_usage.UsageFetchResult:
         nonlocal calls
         calls += 1
         return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
@@ -1747,7 +1747,7 @@ async def test_usage_refresh_waiters_share_fetch_and_cancellation(monkeypatch) -
     calls = 0
     result = ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
 
-    async def fetch():
+    async def fetch(**_kwargs):
         nonlocal calls
         calls += 1
         started.set()
@@ -1774,7 +1774,7 @@ async def test_usage_refresh_wait_replaces_pending_retry(monkeypatch) -> None:
     fetcher._retry_task = asyncio.create_task(asyncio.sleep(3600))
     retry = fetcher._retry_task
 
-    async def fetch():
+    async def fetch(**_kwargs):
         return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
 
     monkeypatch.setattr(ai_usage, "fetch_usage", fetch)
@@ -1787,7 +1787,7 @@ async def test_usage_refresh_wait_replaces_pending_retry(monkeypatch) -> None:
 async def test_usage_fetcher_retries_after_failure(monkeypatch) -> None:
     calls = 0
 
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    async def fake_fetch(timeout: float = 20.0, **_kwargs) -> ai_usage.UsageFetchResult:
         nonlocal calls
         calls += 1
         if calls == 1:
@@ -1810,7 +1810,7 @@ async def test_usage_fetcher_retries_after_failure(monkeypatch) -> None:
 
 
 async def test_usage_fetcher_does_not_retry_auth_error(monkeypatch) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    async def fake_fetch(timeout: float = 20.0, **_kwargs) -> ai_usage.UsageFetchResult:
         return ai_usage.UsageFetchResult(
             FetchStatus.ERROR,
             {
@@ -1833,7 +1833,7 @@ async def test_usage_fetcher_does_not_retry_auth_error(monkeypatch) -> None:
 
 
 async def test_usage_fetcher_does_not_retry_rate_limit(monkeypatch) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
+    async def fake_fetch(timeout: float = 20.0, **_kwargs) -> ai_usage.UsageFetchResult:
         return ai_usage.UsageFetchResult(
             FetchStatus.ERROR,
             {"providers": {"claude": {"error": "request failed: rate limited: HTTP 429"}}},
@@ -1849,65 +1849,180 @@ async def test_usage_fetcher_does_not_retry_rate_limit(monkeypatch) -> None:
     assert fetcher._retry_task is None
 
 
-def test_tun_device_up(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(ai_usage, "_SYS_CLASS_NET", tmp_path)
-    assert ai_usage.tun_device_up("tun0") is False
+def test_proxy_only_handler_refuses_direct_connection(monkeypatch) -> None:
+    import http.client
 
-    device = tmp_path / "tun0"
-    device.mkdir()
-    (device / "flags").write_text("0x0\n")
-    assert ai_usage.tun_device_up("tun0") is False
+    handler = ai_usage._ProxyOnlyHTTPSHandler("127.0.0.1:7890")
 
-    (device / "flags").write_text("0x41\n")  # IFF_UP | IFF_RUNNING
-    assert ai_usage.tun_device_up("tun0") is True
+    class Boom:
+        debuglevel = 0
 
-    (device / "flags").write_text("garbage\n")
-    assert ai_usage.tun_device_up("tun0") is False
+        def __init__(self, *args, **kwargs):
+            pytest.fail(f"direct connection attempted: {args}")
 
-
-async def test_usage_fetcher_skips_fetch_when_tun_device_down(monkeypatch) -> None:
-    calls = 0
-
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
-        nonlocal calls
-        calls += 1
-        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
-
-    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
-    monkeypatch.setattr(ai_usage, "tun_device_up", lambda name: False)
-    monkeypatch.setattr(ai_usage, "RETRY_BACKOFF_SECONDS", (0,))
-
-    fetcher = UsageFetcher(tun_device="tun0")
-    fetcher.refresh()
-    await fetcher._task
-    assert calls == 0
-    assert fetcher.get() is None
-    assert fetcher._fetched_at is None
-    assert fetcher._retry_task is not None
-
-    await fetcher._retry_task
-    assert calls == 0
-
-    monkeypatch.setattr(ai_usage, "tun_device_up", lambda name: True)
-    fetcher.set_tun_device("tun0")
-    fetcher.refresh(force=True)
-    await fetcher._task
-    assert calls == 1
-    assert fetcher.get().status is FetchStatus.OK
+    monkeypatch.setattr(http.client, "HTTPSConnection", Boom)
+    request = ai_usage.Request("https://api.anthropic.com/api/oauth/usage")
+    with pytest.raises(ai_usage.URLError, match="direct connection"):
+        handler.https_open(request)
 
 
-async def test_usage_fetcher_without_tun_device_always_fetches(monkeypatch) -> None:
-    async def fake_fetch(timeout: float = 20.0) -> ai_usage.UsageFetchResult:
-        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+def _block_sockets(monkeypatch):
+    import socket
 
-    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    dials: list[tuple] = []
+
+    def record(address, timeout=None, source_address=None):
+        dials.append(address)
+        raise OSError("proxy down")
+
+    monkeypatch.setattr(socket, "create_connection", record)
+    return dials
+
+
+def test_configured_proxy_dials_proxy_not_origin_when_proxy_is_down(monkeypatch) -> None:
+    import http.client
+
+    dials = _block_sockets(monkeypatch)
+    tunnels: list[tuple[str, dict]] = []
+    original_set_tunnel = http.client.HTTPSConnection.set_tunnel
+
+    def recording_set_tunnel(self, host, port=None, headers=None):
+        tunnels.append((host, dict(headers or {})))
+        return original_set_tunnel(self, host, port, headers)
+
+    monkeypatch.setattr(http.client.HTTPSConnection, "set_tunnel", recording_set_tunnel)
+    monkeypatch.setenv("no_proxy", "*")
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("https_proxy", "http://env-proxy.example:9999")
+    monkeypatch.setenv("http_proxy", "http://env-proxy.example:9999")
+
+    token = ai_usage._http_proxy.set("http://user:p%40ss@127.0.0.1:7890")
+    try:
+        with pytest.raises(RuntimeError, match="proxy down"):
+            ai_usage._request_json("https://api.anthropic.com/api/oauth/usage", "tok", 5)
+        with pytest.raises(RuntimeError, match="proxy down"):
+            ai_usage._post_form_json(
+                "https://auth.openai.com/oauth/token",
+                {"grant_type": "refresh_token"},
+                5,
+            )
+    finally:
+        ai_usage._http_proxy.reset(token)
+
+    assert dials == [("127.0.0.1", 7890), ("127.0.0.1", 7890)]
+    assert [host for host, _headers in tunnels] == ["api.anthropic.com", "auth.openai.com"]
+    auth = base64.b64encode(b"user:p@ss").decode("ascii")
+    assert tunnels[0][1]["Proxy-Authorization"] == f"Basic {auth}"
+    assert tunnels[1][1]["Proxy-Authorization"] == f"Basic {auth}"
+
+
+def test_configured_proxy_redirect_does_not_dial_origin(monkeypatch) -> None:
+    import socket
+    import urllib.request
+    from email.message import Message
+
+    class FakeResponse(io.BytesIO):
+        def __init__(self, status: int, body: bytes, location: str | None = None) -> None:
+            super().__init__(body)
+            self.status = status
+            self.code = status
+            self.reason = "OK" if status == 200 else "Found"
+            self.msg = self.reason
+            self.headers = Message()
+            if location:
+                self.headers["Location"] = location
+
+        def info(self):
+            return self.headers
+
+    seen: list[tuple[str, str | None]] = []
+
+    def fake_do_open(self, http_class, req, **kwargs):
+        seen.append((req.host, req._tunnel_host))
+        if req._tunnel_host == "api.anthropic.com":
+            return FakeResponse(302, b"", location="https://api.example.test/v1/usage")
+        return FakeResponse(200, b'{"ok": true}')
+
+    monkeypatch.setattr(urllib.request.AbstractHTTPHandler, "do_open", fake_do_open)
     monkeypatch.setattr(
-        ai_usage,
-        "tun_device_up",
-        lambda name: pytest.fail("tun_device_up called without a configured device"),
+        socket, "create_connection", lambda *args, **kwargs: pytest.fail(f"direct socket {args}")
     )
+    monkeypatch.setenv("no_proxy", "*")
+    token = ai_usage._http_proxy.set("http://127.0.0.1:7890")
+    try:
+        assert ai_usage._request_json("https://api.anthropic.com/api/oauth/usage", "tok", 5) == {
+            "ok": True
+        }
+    finally:
+        ai_usage._http_proxy.reset(token)
+    assert seen == [
+        ("127.0.0.1:7890", "api.anthropic.com"),
+        ("127.0.0.1:7890", "api.example.test"),
+    ]
 
-    fetcher = UsageFetcher()
+
+def test_unusable_proxy_does_not_dial_origin(monkeypatch) -> None:
+    dials = _block_sockets(monkeypatch)
+    token = ai_usage._http_proxy.set("http://127.0.0.1:78901")
+    try:
+        with pytest.raises(RuntimeError, match="invalid port"):
+            ai_usage._request_json("https://api.anthropic.com/api/oauth/usage", "tok", 1)
+    finally:
+        ai_usage._http_proxy.reset(token)
+    assert dials == []
+
+
+def test_unconfigured_proxy_connects_directly(monkeypatch) -> None:
+    dials = _block_sockets(monkeypatch)
+    for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY", "no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    with pytest.raises(RuntimeError, match="proxy down"):
+        ai_usage._request_json("https://api.anthropic.com/api/oauth/usage", "tok", 1)
+    assert dials == [("api.anthropic.com", 443)]
+
+
+async def test_fetch_usage_propagates_proxy_to_workers() -> None:
+    seen: list[str] = []
+
+    def capture(_timeout: float) -> dict:
+        seen.append(ai_usage._http_proxy.get())
+        return {"accounts": []}
+
+    original = {
+        name: getattr(ai_usage, name)
+        for name in (
+            "_fetch_claude",
+            "_fetch_codex",
+            "_fetch_opencode_go",
+            "_fetch_moonshot",
+            "_fetch_xai",
+            "_fetch_kimi_code",
+        )
+    }
+    for name in original:
+        setattr(ai_usage, name, capture)
+    try:
+        await ai_usage.fetch_usage(proxy="http://127.0.0.1:7890")
+    finally:
+        for name, func in original.items():
+            setattr(ai_usage, name, func)
+    assert seen == ["http://127.0.0.1:7890"] * 6
+    assert ai_usage._http_proxy.get() == ""
+
+
+async def test_usage_fetcher_passes_configured_proxy(monkeypatch) -> None:
+    seen: list[str] = []
+
+    async def fake_fetch(timeout: float = 20.0, *, proxy: str = "") -> ai_usage.UsageFetchResult:
+        seen.append(proxy)
+        return ai_usage.UsageFetchResult(FetchStatus.OK, {"providers": PROVIDERS})
+
+    monkeypatch.setattr(ai_usage, "fetch_usage", fake_fetch)
+    fetcher = UsageFetcher(http_proxy="http://127.0.0.1:7890")
     fetcher.refresh()
     await fetcher._task
-    assert fetcher.get().status is FetchStatus.OK
+    fetcher.set_http_proxy("http://127.0.0.1:8080")
+    fetcher._fetched_at = None
+    fetcher.refresh()
+    await fetcher._task
+    assert seen == ["http://127.0.0.1:7890", "http://127.0.0.1:8080"]

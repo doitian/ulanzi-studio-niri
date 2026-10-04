@@ -146,15 +146,17 @@ HTTP 429 responses are not retried automatically. Press any usage widget to
 request a manual refresh. Manual refreshes are throttled to one fetch every
 90 seconds.
 
-When the providers are only reachable through a VPN, set `tun_device` once in
-the root `[ai_usage]` section; the daemon then calls provider APIs only while
-that interface is up. Skipped fetches keep the cached data and are retried on
-the failure backoff schedule, so widgets update on their own once the tunnel
-comes up:
+When the providers are only reachable through a proxy, set `http_proxy` once
+in the root `[ai_usage]` section. Usage and token-refresh requests are then
+sent through that HTTP proxy. A missing, down, or unusable proxy does not
+block daemon startup. If the proxy cannot be used, or `NO_PROXY` would
+otherwise bypass it, the daemon does not connect directly to the API servers.
+The fetch fails, cached data is kept, and the failure backoff retries until
+the proxy accepts the request:
 
 ```toml
 [ai_usage]
-tun_device = "tun0"
+http_proxy = "http://127.0.0.1:7890"
 ```
 
 The same cached data is available immediately from the running daemon:

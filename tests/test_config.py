@@ -571,40 +571,65 @@ def test_encoder_unknown_key_rejected() -> None:
         )
 
 
-def test_ai_usage_tun_device_defaults_empty() -> None:
+def test_ai_usage_http_proxy_defaults_empty() -> None:
     cfg = _load(
         """
         [[page]]
         name = "x"
         """
     )
-    assert cfg.ai_usage.tun_device == ""
+    assert cfg.ai_usage.http_proxy == ""
 
 
-def test_ai_usage_tun_device_root_section() -> None:
+def test_ai_usage_http_proxy_root_section() -> None:
     cfg = _load(
         """
         [ai_usage]
-        tun_device = "tun0"
+        http_proxy = "http://127.0.0.1:7890"
 
         [[page]]
         name = "x"
         """
     )
-    assert cfg.ai_usage.tun_device == "tun0"
+    assert cfg.ai_usage.http_proxy == "http://127.0.0.1:7890"
 
 
-def test_ai_usage_tun_device_rejects_invalid_name() -> None:
-    with pytest.raises(ValidationError):
-        _load(
-            """
-            [ai_usage]
-            tun_device = "../tun0"
+def test_ai_usage_http_proxy_strips_whitespace() -> None:
+    cfg = _load(
+        """
+        [ai_usage]
+        http_proxy = "  https://user:p%40ss@[::1]:8443/  "
 
-            [[page]]
-            name = "x"
-            """
-        )
+        [[page]]
+        name = "x"
+        """
+    )
+    assert cfg.ai_usage.http_proxy == "https://user:p%40ss@[::1]:8443/"
+
+
+@pytest.mark.parametrize(
+    "proxy",
+    [
+        "not-a-proxy",
+        "127.0.0.1:7890",
+        "socks5://127.0.0.1:1080",
+        "http://127.0.0.1",
+        "http://127.0.0.1:78901",
+        "http://127.0.0.1:7890/path",
+        "http://127.0.0.1:7890?x=1",
+    ],
+)
+def test_ai_usage_http_proxy_unusable_url_does_not_block_config_load(proxy: str) -> None:
+    cfg = _load(
+        f"""
+        [ai_usage]
+        http_proxy = "{proxy}"
+
+        [[page]]
+        name = "x"
+        """
+    )
+    assert cfg.ai_usage.http_proxy == proxy
 
 
 def test_ai_usage_unknown_key_rejected() -> None:
@@ -612,7 +637,7 @@ def test_ai_usage_unknown_key_rejected() -> None:
         _load(
             """
             [ai_usage]
-            tun = "tun0"
+            proxy = "http://127.0.0.1:7890"
 
             [[page]]
             name = "x"

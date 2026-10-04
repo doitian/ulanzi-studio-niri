@@ -22,8 +22,8 @@ enabled = false
 
 # Shared options for all [[page.ai_usage]] widgets.
 # [ai_usage]
-# Only call provider APIs while this interface is up (e.g. a VPN tunnel):
-# tun_device = "tun0"
+# Send provider API requests through an HTTP proxy, never directly:
+# http_proxy = "http://127.0.0.1:7890"
 
 [label]
 align = "bottom"

@@ -8,6 +8,7 @@ import re
 import tomllib
 from pathlib import Path
 from typing import Annotated, Any, Literal
+from urllib.parse import unquote, urlparse
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -376,22 +377,43 @@ class AU05Config(BaseModel):
     enabled: bool = False
 
 
+def split_http_proxy(proxy: str) -> tuple[str, str | None, str | None, str]:
+    """Return ``(scheme, user, password, hostport)`` for an HTTP(S) proxy URL."""
+    parsed = urlparse(proxy.strip())
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"http_proxy {proxy!r} has an invalid port") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or port is None:
+        raise ValueError(
+            f"http_proxy {proxy!r} must be an http:// or https:// URL with a host and port"
+        )
+    if parsed.path not in {"", "/"} or parsed.query or parsed.fragment:
+        raise ValueError(f"http_proxy {proxy!r} must not include a path, query, or fragment")
+    host = parsed.hostname
+    if ":" in host:
+        host = f"[{host}]"
+    user = unquote(parsed.username) if parsed.username is not None else None
+    password = unquote(parsed.password or "") if user is not None else None
+    return parsed.scheme, user, password, f"{host}:{port}"
+
+
 class AIUsageConfig(BaseModel):
     """Shared options for all [[page.ai_usage]] widgets."""
 
     model_config = ConfigDict(extra="forbid")
 
-    tun_device: str = ""  # only call provider APIs while this interface is up
+    # Provider usage and token refresh go only through this proxy. An unusable
+    # or down proxy fails the fetch and does not block daemon startup; requests
+    # are not sent directly to the API servers.
+    http_proxy: str = ""
 
-    @field_validator("tun_device")
+    @field_validator("http_proxy")
     @classmethod
-    def _validate_tun_device(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            return ""
-        if "/" in v or v in {".", ".."} or len(v) > 15:
-            raise ValueError(f"tun_device {v!r} must be a network interface name")
-        return v
+    def _validate_http_proxy(cls, v: str) -> str:
+        # Do not reject an unusable URL here. Config load runs at startup, and
+        # a missing proxy must not prevent the daemon from serving the device.
+        return v.strip()
 
 
 class LabelConfig(BaseModel):
