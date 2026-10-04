@@ -446,11 +446,14 @@ Pushing a stable semantic version tag such as `v2.0.0` runs
 tags are not published by this workflow.
 
 The first job validates the tag and requires its version (without `v`) to
-exactly match `[project].version` in `pyproject.toml`. An invalid tag or version
-mismatch fails the release before tests, builds, or publishing. After tests,
-lint, and type checks pass, the workflow builds the source distribution and
-wheel, checks the installed wheel outside the repository, publishes those
-artifacts to PyPI, and creates a GitHub Release with the distribution files.
+exactly match `[project].version` in `pyproject.toml`, and requires a non-empty
+`CHANGELOG.md` section for that version. An invalid tag, version mismatch, or
+missing changelog section fails the release before tests, builds, or
+publishing. After tests, lint, and type checks pass, the workflow builds the
+source distribution and wheel, checks the installed wheel outside the
+repository, publishes those artifacts to PyPI, and creates a GitHub Release
+with the distribution files. The release notes are that version's changelog
+section followed by a Full Changelog compare link from the previous tag.
 
 Before the first release, configure a [PyPI Trusted Publisher](https://docs.pypi.org/trusted-publishers/adding-a-publisher/)
 for `ulanzi-studio-niri` using these exact values:

@@ -23,6 +23,9 @@ jobs:
       - name: Require a semantic version tag matching the package
         run: python3 .github/scripts/validate_release.py
 
+      - name: Require a CHANGELOG.md section for the release
+        run: python3 .github/scripts/release_notes.py > /dev/null
+
   test:
     name: Test before publish
     needs: validate
@@ -106,6 +109,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v5
+
       - name: Download distribution artifacts
         uses: actions/download-artifact@v6
         with:
@@ -116,9 +121,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          python3 .github/scripts/release_notes.py > "$RUNNER_TEMP/release-notes.md"
           gh release create "$GITHUB_REF_NAME" \
             --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --verify-tag \
-            --generate-notes \
+            --notes-file "$RUNNER_TEMP/release-notes.md" \
             dist/*
